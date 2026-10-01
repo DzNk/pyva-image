@@ -1,0 +1,20 @@
+# Build outputs and local Python environments
+/bazel-*
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Installed agent tooling, not project-owned instructions
+/.agents/skills/
+/.codex/
+
+# Local credentials and consumer certificates
+/.aws/
+/.ssh/
+/.docker/
+.env
+.env.*
+!.env.example
+*.key
+/certs/

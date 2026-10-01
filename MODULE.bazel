@@ -1,0 +1,49 @@
+module(
+    name = "pyva_runtime",
+    version = "1.0.0",
+)
+
+bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_python", version = "2.3.4")
+bazel_dep(name = "rules_distroless", version = "0.9.4")
+bazel_dep(name = "rules_pkg", version = "1.0.1")
+bazel_dep(name = "bazel_lib", version = "3.0.0")
+bazel_dep(name = "tar.bzl", version = "0.7.0")
+bazel_dep(name = "gawk", version = "5.3.2.bcr.3")
+
+# rules_distroless 0.9.4 loads Gazelle from its public Starlark implementation.
+bazel_dep(name = "gazelle", version = "0.34.0", repo_name = "bazel_gazelle")
+
+# rules_distroless exposes these toolchains to its own module, but Bazel does
+# not re-export module-extension repositories to consumers.
+bazel_lib_toolchains = use_extension("@bazel_lib//lib:extensions.bzl", "toolchains")
+use_repo(bazel_lib_toolchains, "coreutils_toolchains", "zstd_toolchains")
+
+tar_toolchains = use_extension("@tar.bzl//tar:extensions.bzl", "toolchains")
+use_repo(tar_toolchains, "bsd_tar_toolchains")
+
+include("//:python_runtimes.MODULE.bazel")
+
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "distroless_static_debian13",
+    digest = "sha256:a8a6666cb7b13df7d18fd65b4264c2edafbce92acc0f32c423b5470d7d717665",
+    image = "gcr.io/distroless/static-debian13",
+    platforms = ["linux/amd64"],
+)
+use_repo(oci, "distroless_static_debian13", "distroless_static_debian13_linux_amd64")
+
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["trixie"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20250901T000000Z"],
+)
+apt.install(
+    dependency_set = "debian13_openjdk21",
+    packages = ["openjdk-21-jre-headless"],
+    suites = ["trixie"],
+)
+use_repo(apt, "debian13_openjdk21")

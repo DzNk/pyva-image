@@ -1,0 +1,40 @@
+load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_mkdirs", "pkg_mklink")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load(":runtime_image.bzl", "runtime_image")
+
+exports_files(["python_runtimes.MODULE.bazel"])
+
+pkg_mkdirs(
+    name = "app_dir",
+    attributes = pkg_attributes(gid = 65532, mode = "0755", uid = 65532),
+    dirs = ["app"],
+)
+
+pkg_mkdirs(
+    name = "certs_dir",
+    attributes = pkg_attributes(mode = "0755"),
+    dirs = ["etc/certs"],
+)
+
+pkg_mklink(
+    name = "java",
+    link_name = "usr/bin/java",
+    target = "../lib/jvm/java-21-openjdk-amd64/bin/java",
+)
+
+pkg_tar(
+    name = "metadata_layer",
+    srcs = [":app_dir", ":certs_dir", ":java"],
+)
+
+# Debian 13 is merged-/usr; normalize the package closure before layering it.
+deb_postfix(
+    name = "java_layer",
+    mergedusr = True,
+    outs = ["java_layer.tar.gz"],
+    srcs = ["@debian13_openjdk21//:flat"],
+)
+
+runtime_image(python_version = "3.13")
+runtime_image(python_version = "3.14")

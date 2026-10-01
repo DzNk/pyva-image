@@ -1,0 +1,18 @@
+ARG PYTHON_VERSION=3.13
+ARG RUNTIME_IMAGE=pyva-runtime:${PYTHON_VERSION}
+
+FROM maven:3.9-eclipse-temurin-21 AS poi
+COPY poi-smoke-pom.xml /pom.xml
+RUN mvn -q -f /pom.xml dependency:copy-dependencies -DoutputDirectory=/poi
+
+FROM python:${PYTHON_VERSION}-slim AS python_deps
+RUN python -m pip install --no-cache-dir --only-binary=:all: --target /python jpype1==1.7.1
+
+FROM ${RUNTIME_IMAGE}
+USER 0
+COPY --from=poi /poi /app/poi
+COPY --from=python_deps /python /opt/python
+COPY --chown=65532:65532 poi_smoke.py /app/poi_smoke.py
+USER 65532:65532
+ENV PYTHONPATH=/opt/python
+CMD ["/app/poi_smoke.py"]

@@ -1,0 +1,5 @@
+# POI smoke build: only local Dockerfile/COPY inputs enter the context.
+**
+!Dockerfile.poi-smoke
+!poi-smoke-pom.xml
+!poi_smoke.py
