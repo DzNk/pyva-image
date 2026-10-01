@@ -8,6 +8,7 @@ import urllib.request
 
 
 MINORS = ("3.13", "3.14")
+PLATFORMS = {"amd64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"}
 LATEST = "https://raw.githubusercontent.com/astral-sh/python-build-standalone/latest-release/latest-release.json"
 RELEASES = "https://github.com/astral-sh/python-build-standalone/releases/download"
 OUTPUT = pathlib.Path(__file__).with_name("python_runtimes.MODULE.bazel")
@@ -23,28 +24,31 @@ def manifest(tag, checksums):
             continue
         match = re.fullmatch(
             r"cpython-((?:3\.13|3\.14)\.[0-9]+)\+"
-            + tag + r"-x86_64-unknown-linux-gnu-(install_only(?:_stripped)?)\.tar\.gz",
+            + tag + r"-(x86_64|aarch64)-unknown-linux-gnu-(install_only(?:_stripped)?)\.tar\.gz",
             fields[-1],
         )
         if not match:
             continue
         if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{64}", fields[0]):
             raise ValueError(f"invalid SHA-256 record: {line}")
-        version, flavor = match.groups()
-        key = (version, flavor)
-        record = (version, f"{RELEASES}/{tag}/{fields[1]}", fields[0])
+        version, cpu, flavor = match.groups()
+        arch = "amd64" if cpu == "x86_64" else "arm64"
+        key = (version, arch, flavor)
+        record = (version, arch, f"{RELEASES}/{tag}/{fields[1]}", fields[0])
         if key in records and records[key] != record:
             raise ValueError(f"conflicting artifact records for Python {version}")
         records[key] = record
     selected = []
     for minor in MINORS:
-        candidates = [v for v, _ in records if v.startswith(minor + ".")]
+        candidates = [v for v, _, _ in records if v.startswith(minor + ".")]
         if not candidates:
-            raise ValueError(f"missing stable x86_64 Python artifacts: {minor}")
+            raise ValueError(f"missing stable Python artifacts: {minor}")
         version = max(candidates, key=lambda v: tuple(map(int, v.split("."))))
-        if (version, "install_only_stripped") not in records:
-            raise ValueError(f"missing stripped artifact for Python {version}")
-        selected.append(records[version, "install_only_stripped"])
+        for arch in PLATFORMS:
+            key = (version, arch, "install_only_stripped")
+            if key not in records:
+                raise ValueError(f"missing stripped {arch} artifact for Python {version}")
+            selected.append(records[key])
     return selected
 
 
@@ -55,13 +59,13 @@ def render(runtimes):
         'python.defaults(python_version = "3.13")\n'
         "python.override(minor_mapping = {\n"
     )
-    for version, _, _ in runtimes:
+    for version in dict.fromkeys(version for version, _, _, _ in runtimes):
         content += f'    "{version.rsplit(".", 1)[0]}": "{version}",\n'
     content += "})\n"
-    for version, url, sha in runtimes:
+    for version, arch, url, sha in runtimes:
         content += (
             "python.single_version_platform_override(\n"
-            '    platform = "x86_64-unknown-linux-gnu",\n'
+            f'    platform = "{PLATFORMS[arch]}",\n'
             f'    python_version = "{version}",\n'
             f'    sha256 = "{sha}",\n'
             '    strip_prefix = "python",\n'
@@ -70,14 +74,16 @@ def render(runtimes):
         )
     for minor in MINORS:
         content += f'python.toolchain(python_version = "{minor}")\n'
-    return content + (
+    content += (
         "use_repo(\n"
         "    python,\n"
         '    "pythons_hub",\n'
-        '    cpython_3_13 = "python_3_13_x86_64-unknown-linux-gnu",\n'
-        '    cpython_3_14 = "python_3_14_x86_64-unknown-linux-gnu",\n'
-        ")\n"
     )
+    for minor in MINORS:
+        suffix = minor.replace(".", "_")
+        for arch, platform in PLATFORMS.items():
+            content += f'    cpython_{suffix}_{arch} = "python_{suffix}_{platform}",\n'
+    return content + ")\n"
 
 
 def refresh(tag, checksums, destination=OUTPUT):
