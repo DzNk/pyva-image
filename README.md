@@ -2,6 +2,8 @@
 
 **Python · Java 21 · JPype · Apache POI · Distroless**
 
+[Docker Hub: librebuilder098/pyva-runtime](https://hub.docker.com/r/librebuilder098/pyva-runtime)
+
 ## Русский
 
 Образ для приложений, которым нужно вызывать Java-код из Python через JPype:

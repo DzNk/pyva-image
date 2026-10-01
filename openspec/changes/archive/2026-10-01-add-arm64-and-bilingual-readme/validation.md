@@ -108,3 +108,59 @@ The release and smoke inspection calls now select `--platform linux/<arch>`
 explicitly (Docker API 1.49+), and the offline mock requires that selection.
 A reviewed amended source commit and fresh dated tags follow below; image
 inputs/build definitions are unchanged.
+
+## Final corrected source and independent builds
+
+Final reviewed local commit: `3073daf024a16da3817706ac0a29daf0d94ec16f`. Committer epoch `1790882521`, UTC
+`2026-10-01T19:22:01+00:00`.
+Clean detached worktree `/tmp/pyva-release-3073daf`, exact SHA/time and empty
+source status verified. The local commit was amended before final releases; no
+Git push.
+
+Both independent output bases were cleaned (generated outputs/action caches),
+then all four images/load archives and both indexes rebuilt from this corrected
+commit with UTC vs Pacific/Honolulu action environments and lockfile error mode.
+Both builds succeeded. All six OCI digests and four archive hashes matched each
+other and the initial candidate table above. Derived tags matched across timezone
+and rebuild time. Only release/smoke platform inspection, regression and docs
+changed; all pinned image inputs/build definitions stayed identical.
+
+All four final-commit base runs, four target-platform POI XLSX runs and four
+config/ordered-layer comparisons passed again with explicit platform inspection.
+
+## Final live publication
+
+Both corrected release commands completed successfully from the clean final
+worktree using the existing session-supplied Docker Hub repository and external
+credentials. The repository/account is deliberately kept outside tracked files.
+No `--channel` option was passed, and no channel/global-latest operation ran.
+
+Immutable references (`<repository>` is the existing Docker Hub destination):
+
+- Python 3.13: `<repository>:3.13.15-java21-debian13-20261001T192201Z-g3073daf024a16da3817706ac0a29daf0d94ec16f`
+- Python 3.14: `<repository>:3.14.7-java21-debian13-20261001T192201Z-g3073daf024a16da3817706ac0a29daf0d94ec16f`
+
+| Minor | Registry artifact/platform | Verified digest | Result |
+| --- | --- | --- | --- |
+| 3.13 | index | `sha256:22eee02d8a7a31d89662d67df550849b0c8f026e08bbace89139ba56371edaee` | PASS |
+| 3.13 | amd64 | `sha256:2f5ba950b06a8a3c1a94cfaec20eaeefdca208386aa087eea6e5c3207ec5ac60` | PASS |
+| 3.13 | arm64 | `sha256:e1bf8c5808f692dedfcd9cb5a4967efdd2c03f07a4153d440607a313babc16b9` | PASS |
+| 3.14 | index | `sha256:91d5802af51361e5f332bad8883faf74bbf509bd13f1026d79f81117afc1410d` | PASS |
+| 3.14 | amd64 | `sha256:944658fcee04e1522dcbe5e044089363ce3360a9a9cfe8e2ef139da67c0ce530` | PASS |
+| 3.14 | arm64 | `sha256:6c4f033ba6c5889fbbc1eeb250d21d48b913980fd8bc6bf346bdf888c76ab62d` | PASS |
+
+Both remote indexes contained exactly linux/amd64 and linux/arm64 (ARM64 variant
+v8). All index and child digests matched the validated local outputs. Both
+platforms were explicitly pulled from each verified index, inspected with explicit
+platform selection, compared against candidate configs/ordered layer hashes and
+executed with the complete base smoke checks: all four post-pull runs passed.
+Pre-upload base/POI gates also passed for both platforms of each minor.
+
+The old `3.13.15-java21-debian13` tag was inspected again after both releases and
+still resolved to `sha256:3a7d328bbdf6ed7b02862268a6ba1e912b307fdb6840a827f80f1d62f28a96be`,
+identical to its initial digest. The initial dated 3.13 candidate tag was retained
+as well. No existing immutable tags were overwritten.
+
+The final detached checkout remained clean at
+`3073daf024a16da3817706ac0a29daf0d94ec16f`. Source was not pushed; final progress
+marks and this evidence remain modifications in the main working tree.
