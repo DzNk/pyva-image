@@ -29,8 +29,7 @@ payload below a whiteout, code/metadata/vendor/wheel/helper paths, invalid paths
 corrupt/malformed layers and retained unrelated package files/metadata.
 `python3 test_python_manifest.py` passed.
 
-Runtime, POI, final inputs and independent build evidence will be appended after
-those checks actually complete; no publication is claimed by this change alone.
+Runtime, POI, final-input and independent-build results are recorded below.
 
 All four cleaned original-input images passed full base smoke, installer absence,
 negative pip/ensurepip invocation and creation/execution of `venv --without-pip`.
@@ -75,3 +74,40 @@ Offline manifest/OCI/release/repository regressions, native Bazel catalog
 isolation, shell syntax and both strict OpenSpec validations passed. Candidate
 review excluded unrelated CI planning, ignored outputs and obvious credential
 signatures. This is a joint release of the two explicitly requested changes.
+
+## Clean release source
+
+Release source commit: `ef7f84fe5b134206b927081af39bd0fb76c492bd`; UTC committer timestamp: `20261015T170914Z`
+(epoch `1792084154`). Detached release checkout has exact SHA and empty
+`git status --porcelain --untracked-files=all`. Unrelated untracked CI planning
+stays in the main working copy. No source push.
+
+## Independent release builds
+
+Two fresh independent Bazel output bases built the clean source commit with
+`--lockfile_mode=error` and action timezones UTC / Pacific-Honolulu. All four
+image digests, two index digests and four Docker archive hashes match exactly,
+and match the outputs used by the successful execution matrix. Both builds
+passed all-layer installer policy. The detached source remained clean.
+
+| Minor | Artifact | Identical digest |
+| --- | --- | --- |
+| 3.13 | index | `sha256:a3065911aba086691b357ea847e6636651a8a809edf73141e616803a3ddca708` |
+| 3.13 | amd64 | `sha256:044850d1d275b8de101879f536b4243b0d265804ef9d27fef4a59e6d9d6bfbd9` |
+| 3.13 | arm64 | `sha256:c62143f8e1e877d26b94d3ad5aa0e777071ee860914d40bd849bbcbc234e0eca` |
+| 3.14 | index | `sha256:e9699e5d19255b03d30c848cd15f1cb5824b3e13fca6d73a1a5880506711d85b` |
+| 3.14 | amd64 | `sha256:6a16d8935d1ece574ddb938286929ae0c6f94d1ec2cb0b2881b106e5b8430a85` |
+| 3.14 | arm64 | `sha256:68b24ba9fffa6fb532be144bf65a870f280d05cc2cf87f28abff6a3a58a01400` |
+
+Docker-load archive SHA-256:
+
+- `pyva_runtime_3_13_amd64_load`: `fed8cf9e5f1383405d7d4eab590d4bcc13843c131f53e36d6246bb2fef779928`
+- `pyva_runtime_3_13_arm64_load`: `db115323d8fe5c6ee4b2a21c4d586d66ed8f8680126453b5b387f5215540f371`
+- `pyva_runtime_3_14_amd64_load`: `dacbd40fa27b77ebccace7b8afd8c1f10d40c1c6db8b77821ee7bf22ca855efa`
+- `pyva_runtime_3_14_arm64_load`: `017c27b93b891631caff5495fefbbe8a40bb8c3160a7b0ece15a846b0af273ba`
+
+## Result and scanner limit
+
+All specified project implementation and verification checks passed. The
+corporate scanner was not run, and no claim is made about cffi filename-based
+findings or consumer dependencies reintroducing installer packages.
