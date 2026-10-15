@@ -54,7 +54,7 @@ for minor in 3.13 3.14; do
       --build-arg "PYTHON_VERSION=$minor" \
       --build-arg "RUNTIME_IMAGE=pyva-runtime:$minor-$arch" \
       --tag "pyva-poi-smoke:$minor-$arch" .
-    docker run --rm --platform "linux/$arch" "pyva-poi-smoke:$minor-$arch"
+    docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$minor-$arch"
   done
 done
 ```
@@ -70,8 +70,10 @@ Apache POI 5.4.1 in builder stages, writes XLSX and checks its ZIP structure.
 ## Downstream dependencies and certificates
 
 The runtime has no shell or package manager. Install Python dependencies in a
-matching Python minor/platform builder and copy its site-packages; supply Java
-JARs separately. For example:
+matching Python minor/platform builder with a compatible GIL/ABI and Debian/glibc
+environment; supply required shared libraries and Java JARs separately. The base
+contains no pip, ensurepip or setuptools, including pip's vendored msgpack and
+pkg_resources. Install dependencies only in the builder. For example:
 
 ```Dockerfile
 FROM python:3.13-slim AS deps
@@ -87,6 +89,21 @@ USER 65532:65532
 ENV PYTHONPATH=/opt/python
 CMD ["/app/main.py"]
 ```
+
+Copy the installed application packages, their native extensions, package data
+and `.dist-info` metadata; `importlib.metadata` and entry points need that metadata.
+Copying the builder's entire system site-packages can reintroduce installation
+tools. Files such as `cffi/setuptools_ext.py` belong to their application package
+and are not removed; explicitly required standalone msgpack remains supported.
+If application code or legacy entry points need setuptools/pkg_resources at
+runtime, explicitly install a compatible provider in the builder and copy it too.
+Check absolute shebang paths for copied console scripts; the example invokes the
+application through the runtime's `/usr/bin/python3` entrypoint.
+
+`python -m pip`, `python -m ensurepip` and automatic pip bootstrapping with
+`python -m venv` are unsupported. The `venv` module remains available with
+`--without-pip`. Check application startup and migration/initContainer commands
+before changing the consumer's image digest.
 
 Use a matching 3.14 builder/runtime for Python 3.14; select the matching platform
 and local tag for ARM64. Defaults: `/usr/bin/python3`, `/app`, UID/GID 65532.
@@ -116,8 +133,10 @@ two lowercase path components, without schemes, tags, digests or whitespace.
 Other registries are rejected before any build/upload. Components begin/end in
 letters/digits; separators are one dot, one/two underscores or hyphens.
 
-Both base and POI runs must pass and match the candidate manifests. Before upload,
-a confirmed absent immutable tag permits publishing; identical index content
+Both base and POI runs must pass and match the candidate manifests. Local OCI
+inspection checks every layer blob for bundled Python installation tools; hiding
+them with a later whiteout is rejected. Before upload, a confirmed absent
+immutable tag permits publishing; identical index content
 permits a verified retry. Different content, authorization, transport and unknown
 errors stop the release without overwriting. After upload, the index and both
 child digests must match, and both explicit platform pulls/runs must pass.
@@ -155,6 +174,7 @@ when that Dockerfile needs new local COPY inputs.
 bash test_repository.sh
 python3 test_python_manifest.py
 python3 test_python_manifest.py --bazel
+python3 test_image_manifest.py
 bash test_release.sh
 bash -n release.sh smoke_test.sh test_release.sh
 git status --short

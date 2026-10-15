@@ -29,7 +29,7 @@ fi
 version="${identity%-java21-debian13}"
 
 docker run --rm --platform "linux/${arch}" --entrypoint /usr/bin/python3 "$image" -c '
-import os, pathlib, platform, subprocess, sys
+import importlib.metadata, importlib.util, os, pathlib, platform, subprocess, sys, tempfile
 import ssl, ctypes, sqlite3, bz2, lzma, uuid, readline, multiprocessing, venv
 assert platform.python_version() == sys.argv[1]
 arch = sys.argv[2]
@@ -41,6 +41,21 @@ java_home = "/usr/lib/jvm/java-21-openjdk-" + arch
 assert os.environ["JAVA_HOME"] == java_home
 assert os.environ["LD_LIBRARY_PATH"] == java_home + "/lib/server"
 assert os.environ["SSL_CERT_DIR"] == "/etc/certs"
+for module in ("pip", "ensurepip", "setuptools", "pkg_resources", "_distutils_hack"):
+    assert importlib.util.find_spec(module) is None, module
+distributions = {d.metadata["Name"].lower().replace("_", "-") for d in importlib.metadata.distributions()}
+assert not distributions.intersection({"pip", "setuptools"}), distributions
+stdlib = pathlib.Path("/usr/lib/python" + ".".join(platform.python_version_tuple()[:2]))
+for pattern in ("ensurepip", "site-packages/pip", "site-packages/pip-*.dist-info", "site-packages/setuptools", "site-packages/setuptools-*.dist-info", "site-packages/pkg_resources", "site-packages/_distutils_hack", "site-packages/distutils-precedence.pth"):
+    assert not list(stdlib.glob(pattern)), pattern
+for command in ("pip", "pip3", "pip" + ".".join(platform.python_version_tuple()[:2])):
+    assert not os.path.lexists("/usr/bin/" + command), command
+for module in ("pip", "ensurepip"):
+    result = subprocess.run([sys.executable, "-m", module], capture_output=True, text=True)
+    assert result.returncode != 0 and "No module named " + module in result.stderr, result.stderr
+with tempfile.TemporaryDirectory() as directory:
+    venv.create(directory, with_pip=False)
+    subprocess.run([directory + "/bin/python", "-c", "import sys; assert sys.prefix != sys.base_prefix"], check=True)
 assert pathlib.Path("/etc/certs").is_dir()
 assert not list(pathlib.Path("/etc/certs").iterdir())
 ctypes.CDLL(java_home + "/lib/server/libjvm.so")

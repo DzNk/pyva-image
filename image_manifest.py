@@ -1,10 +1,40 @@
 #!/usr/bin/env python3
 """Read native OCI layouts and verify Docker buildx registry descriptors."""
 import hashlib
+import io
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sys
+import tarfile
+
+
+def packaging_path(name):
+    path = PurePosixPath(name)
+    if path.is_absolute() or ".." in path.parts or "\\" in name:
+        raise ValueError("invalid layer member path: " + name)
+    name = str(path)
+    if re.fullmatch(r"usr/bin/pip(?:3(?:\.(?:13|14))?)?", name):
+        return True
+    match = re.fullmatch(r"usr/lib/python3\.(?:13|14)/(.*)", name)
+    if not match:
+        return False
+    relative = match[1]
+    if relative.split("/", 1)[0] == "ensurepip":
+        return True
+    if relative.startswith("site-packages/"):
+        package = relative.split("/", 2)[1]
+        return package in {"pip", "setuptools", "pkg_resources", "_distutils_hack", "distutils-precedence.pth"} or bool(
+            re.fullmatch(r"(?:pip|setuptools)-[^/]+\.dist-info", package)
+        )
+    return False
+
+
+def check_layer(data):
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
+        for member in archive:
+            if packaging_path(member.name):
+                raise ValueError("installer payload in base layer: " + member.name)
 
 
 def digest(value):
@@ -32,17 +62,21 @@ def local(root, minor):
         data = (root / "blobs/sha256" / expected.split(":")[1]).read_bytes()
         if "sha256:" + hashlib.sha256(data).hexdigest() != expected or len(data) != descriptor["size"]:
             raise ValueError("candidate blob differs from its descriptor")
-        return json.loads(data)
+        return data
 
     descriptor, = json.loads((root / "index.json").read_text())["manifests"]
-    index = blob(descriptor)
+    index = json.loads(blob(descriptor))
     child_digests = children(index)
     versions = set()
     configs = {}
     for child in index["manifests"]:
         arch = child["platform"]["architecture"]
-        manifest = blob(child)
-        config = blob(manifest["config"])
+        manifest = json.loads(blob(child))
+        config = json.loads(blob(manifest["config"]))
+        if not manifest["layers"]:
+            raise ValueError("candidate has no filesystem layers")
+        for layer in manifest["layers"]:
+            check_layer(blob(layer))
         if (config["os"], config["architecture"]) != ("linux", arch):
             raise ValueError("config platform differs from index")
         version = config["config"]["Labels"]["org.opencontainers.image.version"]

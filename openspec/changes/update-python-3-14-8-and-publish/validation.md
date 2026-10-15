@@ -1,0 +1,72 @@
+# Validation
+
+## Captured inputs
+
+2026-10-15: captured official Astral latest metadata and tagged `SHA256SUMS`.
+Selected release: `20261013`; selected stable patches are exactly 3.13.16/3.14.8.
+
+| Python | Architecture | Immutable URL | SHA-256 |
+| --- | --- | --- | --- |
+| 3.13.16 | amd64 | `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.13.16+20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `d0080766b6b74aeb81e1949ef0d9a20e6c17f7b160fb295a69b936ccb17660be` |
+| 3.13.16 | arm64 | `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.13.16+20261013-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz` | `69a30ed26198178732c37b8de0b6b5191479fbacfe526954da776befe38f18e7` |
+| 3.14.8 | amd64 | `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8+20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `d8faa1b588506b9e3e5a3f57807bb056d534a1641a6b10d15b6ea3f0b413b960` |
+| 3.14.8 | arm64 | `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8+20261013-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz` | `d8ae14f303d3971431184cf423ae5467202de2bc19bf6491a490250b87647d4b` |
+
+Docker 29.8.2 / API 1.56; ARM64 execution verified. Final builds and publication
+have not completed yet. Credentials remain external.
+
+## Resolution and registry preflight
+
+`bazel mod tidy`, `bazel mod deps` and native `show_repo` completed. All four
+repository versions/URLs/hashes match the captured inputs. Module/rules, OS and
+JVM pins are unchanged. Lock regeneration produces an identical file: the
+reproducible Python extension does not have runtime input records in this lock.
+`test_python_manifest.py --bazel` passed saved-input/catalog isolation.
+
+Four previous immutable refs (the legacy 3.13 tag, initial dated 3.13 tag and
+final corrected 3.13/3.14 tags from the previous release evidence) were inspected
+successfully. Minor channels and global `latest` are confirmed absent. The exact
+before snapshot is retained for post-publication comparison.
+
+Both new OCI indexes built successfully; Bazel verified all four archive hashes.
+Local image identities are 3.13.16/3.14.8, and all referenced layer blobs pass
+the installer-absence policy. Distroless/OS/JVM/rules inputs are unchanged.
+
+## New-input execution matrix
+
+All four combinations of Python 3.13.16/3.14.8 and amd64/arm64 passed base
+smoke, installer module/metadata/file absence, negative installer invocation,
+`venv --without-pip`, exact versions from both interpreter aliases, and OCI
+platform/label/annotation inspection. All four target-platform JPype 1.7.1 /
+Apache POI XLSX workloads succeeded with `--network none`; copied distribution
+metadata remained readable through `importlib.metadata`. The documented builder
+workflow is the existing tested POI multistage pattern; installer runs only in
+the builder.
+
+## Same-patch unstripped baseline
+
+Four GNU/GIL unstripped archives from the same captured Astral release were
+selected with their tagged SHA-256 records in a separate temporary checkout.
+Bazel verified archive integrity and built the same Python packaging/filtering
+with `--lockfile_mode=error`. Production inputs were not changed.
+
+| Minor | Platform | Stripped tar bytes | Unstripped tar bytes |
+| --- | --- | ---: | ---: |
+| 3.13 | amd64 | 90398720 | 254248960 |
+| 3.13 | arm64 | 70543360 | 175790080 |
+| 3.14 | amd64 | 93245440 | 242769920 |
+| 3.14 | arm64 | 72960000 | 167843840 |
+
+Every stripped Python layer is smaller than its equivalent unstripped baseline.
+
+Unstripped integrity inputs:
+
+- `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.13.16+20261013-x86_64-unknown-linux-gnu-install_only.tar.gz` SHA-256 `e588e50db882fa6a89f926d9a9ad64e445183af0eda5bda226a2c151b17db8a6`
+- `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.13.16+20261013-aarch64-unknown-linux-gnu-install_only.tar.gz` SHA-256 `0fce0605da7b6532d5bdaec185336ffaaddd02ec04e27382014952ca4857ed6d`
+- `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8+20261013-x86_64-unknown-linux-gnu-install_only.tar.gz` SHA-256 `322271a761140ffb3f522431048f701831e412c8f64770103d2b881ee2bbaed0`
+- `https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8+20261013-aarch64-unknown-linux-gnu-install_only.tar.gz` SHA-256 `6c3cfb175acca2748d5a9e42208c523bfbc1099ddb928615b5f328ba7c106e83`
+
+Offline manifest/OCI/release/repository regressions, native Bazel catalog
+isolation, shell syntax and both strict OpenSpec validations passed. Candidate
+review excluded unrelated CI planning, ignored outputs and obvious credential
+signatures. This is a joint release of the two explicitly requested changes.

@@ -1,0 +1,24 @@
+# Tasks
+
+## 1. Исключить installer payload до упаковки
+
+- [x] 1.1 Добавить в `runtime_image.bzl` минимальный приватный selection rule перед `pkg_files` для точных repository-relative paths из design; убрать pip entrypoints из обоих путей включения executables. Собрать четыре Python layers на неизменных pinned inputs и сравнить с baseline: запрещённые пути отсутствуют, остальные файлы, contents, executable bits и symlink targets сохранены; записать inputs и сравнение в `validation.md` данного change. Не менять upstream archives, hashes, module lock или packaging compression.
+- [x] 1.2 Расширить `smoke_test.sh` отсутствием pip/ensurepip/setuptools/pkg_resources, их metadata, helpers, wheels и pip entrypoints с учётом dangling links; проверить предсказуемый отказ `python -m pip`/`python -m ensurepip` и создание/запуск `venv --without-pip`. Выполнить smoke для 3.13/3.14 на amd64/arm64, сохранив все existing native/Java/certificate/identity checks, и записать результаты в `validation.md`.
+- [x] 1.3 Обновить обе языковые части README кратким указанием отсутствия pip/setuptools и `CONTRIBUTING.md` builder example, ограничениями venv/runtime installation, переносом runtime metadata и явных setuptools/pkg_resources dependencies при необходимости. Проверить, что pip вызывается только в builder, ABI/minor/platform требования описаны, удаление `cffi/setuptools_ext.py` или нужного msgpack не предлагается; проверить пример через существующий builder/POI workflow.
+
+## 2. Закрепить отсутствие payload в OCI-слоях
+
+- [x] 2.1 Расширить `image_manifest.py local` проверкой plain/gzip tar members всех referenced platform layers без extraction и с проверкой blob integrity; добавить небольшой `test_image_manifest.py` с допустимым OCI fixture и отказами на pip code/metadata/vendor, ensurepip wheel, setuptools/helpers, installer в нижнем слое с whiteout выше и corrupt/malformed layer. Проверить допустимые похожие имена и unrelated distribution metadata; выполнить offline check и инспекцию обоих реально собранных index.
+- [x] 2.2 Обновить synthetic candidates в `test_release.sh` до валидных tar layer blobs и согласованных descriptors/config digests; добавить случай запрещённого installer payload, который блокирует upload. Проверить `bash test_release.sh`, сохранив существующие проверки immutable tags, registry errors, обеих platform gates и channel behavior; документировать `python3 test_image_manifest.py` рядом с existing maintainer checks и проверить publishability нового файла через `test_repository.sh` при необходимости.
+
+## 3. Подтвердить запуск builder dependencies и воспроизводимость
+
+- [x] 3.1 Дополнить `poi_smoke.py` проверкой версии скопированного JPype через `importlib.metadata` и отсутствием installer в финальном image; сохранить текущие JPype/JVM/XLSX проверки и установку только в builder. Собрать `Dockerfile.poi-smoke` для всех четырёх вариантов и запустить финальный workload с `--network none`; подтвердить успешное исполнение native dependencies без pip/setuptools и записать результаты в `validation.md`.
+- [ ] 3.2 Выполнить `python3 test_python_manifest.py`, `python3 test_python_manifest.py --bazel`, `python3 test_image_manifest.py`, `bash test_repository.sh`, `bash test_release.sh`, shell syntax checks и strict OpenSpec validation. Из одного reviewed source revision/набора inputs собрать оба index в двух независимых Bazel output bases с `--lockfile_mode=error`; сравнить четыре platform-image и два index digest и подтвердить, что каждый layer обеих сборок проходит installer policy. Записать реальные pass/fail и digests в `validation.md`, не публикуя образы.
+- [ ] 3.3 Проверить полноту evidence: base inventory, до/после Python payload, четыре base и четыре offline POI запуска, regressions и повторные digests. Зафиксировать ограничение scanner evidence: если корпоративный scanner/report доступен, сравнить одинаковые scanner/version/config до/после на идентифицированных image digests и сопоставить msgpack/setuptools findings с paths; иначе явно записать, что корпоративный scan не повторён и исчезновение cffi/consumer findings не доказано.
+
+## Workflow follow-up
+
+- Перед apply `optimize-python-runtime-packaging` согласовать его обещание сохранить `python -m pip` с выбранным здесь отсутствием installer; существующие соседние planning artifacts не менять в рамках этого change.
+- Для включения очистки в релиз 3.14.8 выполнить этот change до публикации либо выпустить отдельный immutable release через существующий workflow; проверять окончательные inputs и не перезаписывать старые refs.
+- Потребителю перед обновлением `FROM` проверить runtime/startup/initContainer на вызовы pip/ensurepip и использование setuptools/pkg_resources, затем проверить приложение на новом digest. Consumer repo и его проверки не входят в tracked progress этого проекта.

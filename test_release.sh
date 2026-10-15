@@ -109,21 +109,27 @@ prepare() {
   : > "$test_log"
   rm -f "$test_root/inspects" "$test_root/pulled"
   command python3 - "$test_root" "$test_minor" <<'PY'
-import hashlib, json, pathlib, sys
+import hashlib, io, json, os, pathlib, sys, tarfile
 root=pathlib.Path(sys.argv[1]); minor=sys.argv[2]
 layout=root/'bazel-bin'/('pyva_runtime_'+minor.replace('.','_'))
 blobs=layout/'blobs/sha256'; blobs.mkdir(parents=True,exist_ok=True)
 def save(data):
-    raw=json.dumps(data).encode(); sha=hashlib.sha256(raw).hexdigest()
+    raw=data if isinstance(data,bytes) else json.dumps(data).encode(); sha=hashlib.sha256(raw).hexdigest()
     (blobs/sha).write_bytes(raw)
     return {'digest':'sha256:'+sha,'size':len(raw)}
 children=[]; configs={}
+stream=io.BytesIO()
+with tarfile.open(fileobj=stream,mode='w') as archive:
+    name='usr/lib/python'+minor+'/site-packages/pip/__init__.py' if os.environ['test_failure']=='installer-payload' else 'usr/bin/python'+minor
+    member=tarfile.TarInfo(name); member.size=2
+    archive.addfile(member,io.BytesIO(b'ok'))
+layer=save(stream.getvalue())
 for arch in ('amd64','arm64'):
-    config={'os':'linux','architecture':arch,'config':{'Labels':{'org.opencontainers.image.version':minor+'.99-java21-debian13'}},'rootfs':{'diff_ids':[]}}
+    config={'os':'linux','architecture':arch,'config':{'Labels':{'org.opencontainers.image.version':minor+'.99-java21-debian13'}},'rootfs':{'diff_ids':[layer['digest']]}}
     cfg=save(config)
-    (root/('loaded-'+arch+'.json')).write_text(json.dumps({'Os':'linux','Architecture':arch,'Config':config['config'],'RootFS':{'Layers':[]}}))
+    (root/('loaded-'+arch+'.json')).write_text(json.dumps({'Os':'linux','Architecture':arch,'Config':config['config'],'RootFS':{'Layers':[layer['digest']]}}))
     configs[arch]=cfg['digest']
-    child=save({'config':cfg,'layers':[]}); child['platform']={'os':'linux','architecture':arch}
+    child=save({'config':cfg,'layers':[layer]}); child['platform']={'os':'linux','architecture':arch}
     children.append(child)
 idx={'manifests':children}; desc=save(idx)
 (layout/'index.json').write_text(json.dumps({'manifests':[desc]}))
@@ -146,7 +152,7 @@ run_case() {
   else
     [[ "$status" != 0 && "$output" != *'Published '* ]] || { echo "Failure escaped: $test_failure" >&2; return 1; }
     case "$test_failure" in
-      git-status|dirty-*|base-*|poi-*|load-digest|collision|auth|transport|unknown|ambiguous-absence) ! command grep -q '^bazel run' "$test_log" ;;
+      installer-payload|git-status|dirty-*|base-*|poi-*|load-digest|collision|auth|transport|unknown|ambiguous-absence) ! command grep -q '^bazel run' "$test_log" ;;
     esac
     if [[ "$test_failure" != channel-* ]]; then ! command grep -q 'imagetools create' "$test_log"; fi
   fi
@@ -160,7 +166,7 @@ for test_minor in 3.13 3.14; do
     run_case --channel "$test_minor" docker.io/example/pyva-runtime
   done
   test_existing=false
-  for test_failure in git-status dirty-tracked dirty-untracked base-amd64 base-arm64 poi-amd64 poi-arm64 \
+  for test_failure in installer-payload git-status dirty-tracked dirty-untracked base-amd64 base-arm64 poi-amd64 poi-arm64 \
     load-digest collision auth transport unknown ambiguous-absence remote-index remote-child remote-platform \
     pull pull-digest remote-amd64 remote-arm64 channel-copy channel-digest; do
     run_case --channel "$test_minor" docker.io/example/pyva-runtime

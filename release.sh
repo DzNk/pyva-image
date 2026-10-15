@@ -42,7 +42,7 @@ for arch in amd64 arm64; do
   docker build --platform "linux/${arch}" --file Dockerfile.poi-smoke \
     --build-arg "PYTHON_VERSION=${minor}" --build-arg "RUNTIME_IMAGE=${local_image}" \
     --tag "pyva-poi-smoke:${minor}-${arch}" .
-  docker run --rm --platform "linux/${arch}" "pyva-poi-smoke:${minor}-${arch}"
+  docker run --rm --platform "linux/${arch}" --network none "pyva-poi-smoke:${minor}-${arch}"
 done
 
 clean_source

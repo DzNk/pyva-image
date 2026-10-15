@@ -13,6 +13,7 @@ Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
 платформы **linux/amd64** и **linux/arm64**.
 Запуск от UID/GID `65532`, рабочая папка `/app`; без shell и пакетного менеджера.
 Python-зависимости и Java JAR-файлы добавляет приложение; JPype и POI не включены.
+pip, ensurepip и setuptools отсутствуют; зависимости готовятся в отдельном builder.
 
 PEM-сертификаты: `/etc/certs`, по умолчанию `SSL_CERT_DIR=/etc/certs`.
 Каталог изначально пуст; скопируйте свои сертификаты, как в примере ниже.
@@ -28,6 +29,7 @@ Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
 platforms **linux/amd64** and **linux/arm64**.
 Runs as UID/GID `65532` in `/app`, without a shell or package manager.
 The application supplies Python dependencies and Java JARs; JPype and POI are not bundled.
+pip, ensurepip and setuptools are absent; prepare dependencies in a separate builder.
 
 PEM certificates: `/etc/certs`, default `SSL_CERT_DIR=/etc/certs`.
 The directory starts empty; copy your certificates as shown below.

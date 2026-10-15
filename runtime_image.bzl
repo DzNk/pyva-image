@@ -7,6 +7,36 @@ load("@rules_distroless//distroless:defs.bzl", "flatten")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "pkg_mklink")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
+def _runtime_files_impl(ctx):
+    stdlib = "lib/python" + ctx.attr.python_version + "/"
+    site = stdlib + "site-packages/"
+    retained = []
+    for file in ctx.attr.src[DefaultInfo].files.to_list():
+        prefix = "../" + file.owner.workspace_name + "/"
+        if not file.short_path.startswith(prefix):
+            fail("Unexpected interpreter file path: " + file.short_path)
+        path = file.short_path[len(prefix):]
+        if path in ["bin/pip", "bin/pip3", "bin/pip" + ctx.attr.python_version]:
+            continue
+        if path.startswith(stdlib + "ensurepip/"):
+            continue
+        if path.startswith(site):
+            package = path[len(site):].split("/")[0]
+            if package in ["pip", "setuptools", "pkg_resources", "_distutils_hack", "distutils-precedence.pth"]:
+                continue
+            if package.endswith(".dist-info") and (package.startswith("pip-") or package.startswith("setuptools-")):
+                continue
+        retained.append(file)
+    return [DefaultInfo(files = depset(retained))]
+
+_runtime_files = rule(
+    implementation = _runtime_files_impl,
+    attrs = {
+        "src": attr.label(mandatory = True),
+        "python_version": attr.string(mandatory = True),
+    },
+)
+
 def runtime_layers(arch):
     """Package the explicit Debian closure and Java path for one architecture."""
     flatten(
@@ -38,9 +68,6 @@ def runtime_image(python_version, arch):
     repo = "@cpython_" + suffix + "_" + arch
     executables = [
         "idle" + python_version,
-        "pip",
-        "pip3",
-        "pip" + python_version,
         "pydoc" + python_version,
         "python" + python_version,
         "python" + python_version + "-config",
@@ -52,9 +79,14 @@ def runtime_image(python_version, arch):
         "idle3": "idle" + python_version,
         "pydoc3": "pydoc" + python_version,
     }
+    _runtime_files(
+        name = name + "_runtime_files",
+        src = repo + "//:files",
+        python_version = python_version,
+    )
     pkg_files(
         name = name + "_files",
-        srcs = [repo + "//:files"],
+        srcs = [":" + name + "_runtime_files"],
         excludes = [repo + "//:bin/" + path for path in executables + links.keys()],
         prefix = "usr",
         strip_prefix = "/",
