@@ -13,6 +13,6 @@
 
 ## 3. Публикация и проверка Docker Hub
 
-- [ ] 3.1 Выполнить `bash release.sh 3.13 docker.io/librebuilder098/pyva-runtime` без `--channel`; проверить успешные base/POI checks обеих платформ, remote index/child digests и pull/run, сохранить вывод вне checkout до завершения следующей задачи.
-- [ ] 3.2 Из того же чистого commit выполнить `bash release.sh 3.14 docker.io/librebuilder098/pyva-runtime` без `--channel`; проверить успешные base/POI checks обеих платформ, remote index/child digests и pull/run, сохранить вывод.
-- [ ] 3.3 После публикаций дополнить `validation.md`: release commit, выбранные patches/Astral tag, полные immutable Docker Hub теги, index и child digests, результаты четырёх runtime/POI проверок и pull/run. Проверить соответствие фактическому выводу release-команд; отметить выполненные задачи только по полученным результатам.
+- [x] 3.1 Выполнить `bash release.sh 3.13 docker.io/librebuilder098/pyva-runtime` без `--channel`; проверить успешные base/POI checks обеих платформ, remote index/child digests и pull/run, сохранить вывод вне checkout до завершения следующей задачи.
+- [x] 3.2 Из того же чистого commit выполнить `bash release.sh 3.14 docker.io/librebuilder098/pyva-runtime` без `--channel`; проверить успешные base/POI checks обеих платформ, remote index/child digests и pull/run, сохранить вывод.
+- [x] 3.3 После публикаций дополнить `validation.md`: release commit, выбранные patches/Astral tag, полные immutable Docker Hub теги, index и child digests, результаты четырёх runtime/POI проверок и pull/run. Проверить соответствие фактическому выводу release-команд; отметить выполненные задачи только по полученным результатам.
