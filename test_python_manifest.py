@@ -38,6 +38,8 @@ assert manifest(tag, "\n".join(reversed(checksums.splitlines()))) == selected
 assert all(f"/download/{tag}/" in url for _, _, url, _ in selected)
 assert all(url.endswith("-install_only_stripped.tar.gz") for _, _, url, _ in selected)
 contents = render(selected)
+assert 'python.defaults(python_version = "3.12")' in contents
+assert 'python.toolchain(python_version = "3.12")' in contents
 assert contents == render(manifest(tag, checksums))
 assert 'minor_mapping = {\n    "3.13": "3.13.15",\n    "3.14": "3.14.10",\n}' in contents
 assert "available_python_versions" not in contents
