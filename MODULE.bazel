@@ -29,13 +29,19 @@ oci.pull(
     name = "distroless_static_debian13",
     digest = "sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0",
     image = "gcr.io/distroless/static-debian13",
-    platforms = ["linux/amd64", "linux/arm64/v8"],
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
 )
 use_repo(oci, "distroless_static_debian13", "distroless_static_debian13_linux_amd64", "distroless_static_debian13_linux_arm64_v8")
 
 apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
 apt.sources_list(
-    architectures = ["amd64", "arm64"],
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
     components = ["main"],
     suites = ["trixie"],
     types = ["deb"],

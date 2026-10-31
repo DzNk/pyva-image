@@ -40,6 +40,7 @@ assert all(url.endswith("-install_only_stripped.tar.gz") for _, _, url, _ in sel
 contents = render(selected)
 assert 'python.defaults(python_version = "3.12")' in contents
 assert 'python.toolchain(python_version = "3.12")' in contents
+assert '\n\n# Build tools use a catalog runtime' in contents
 assert contents == render(manifest(tag, checksums))
 assert 'minor_mapping = {\n    "3.13": "3.13.15",\n    "3.14": "3.14.10",\n}' in contents
 assert "available_python_versions" not in contents

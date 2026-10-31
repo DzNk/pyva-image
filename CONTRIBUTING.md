@@ -162,6 +162,97 @@ Consumers can use `FROM <repository>:<dated-immutable-tag>` or the index digest.
 Never delete or overwrite an immutable release tag. Restoring saved inputs still
 requires a new reviewed source commit and therefore a new dated release tag.
 
+## GitHub Actions automation
+
+The `Python runtime` workflow in `.github/workflows/ci.yml` checks pull requests
+to `main`, publishes pushes to `main`, and checks Astral daily at **04:23 UTC**.
+Use **Actions → Python runtime → Run workflow → main** to start it immediately.
+Other branches/tags cannot refresh inputs, authenticate to Docker Hub or publish.
+PRs, including forks, run regressions and both Python minors on amd64/arm64
+without repository writes or publishing credentials.
+
+One-time setup for a public GitHub repository and public Docker Hub repository:
+
+1. Set the default branch to `main` and enable GitHub Actions. Standard
+   `ubuntu-24.04` runners are free for public repositories. Jobs skip private
+   repositories before allocating runners; no Actions artifact/cache uploads
+   or paid runners/services are used.
+2. In **Settings → Secrets and variables → Actions → Variables**, add
+   `DOCKERHUB_REPOSITORY` (`docker.io/<namespace>/pyva-runtime`) and
+   `DOCKERHUB_USERNAME` (the Docker ID owning the token, which may differ from
+   the destination namespace).
+3. In the **Secrets** tab, add `DOCKERHUB_TOKEN`, a Docker personal access token
+   with **Read & Write** access to the destination. Docker Personal supports
+   PATs. Create it in Docker **Account settings → Personal access tokens**;
+   copy it directly into the GitHub secret. Rotate the secret when the token
+   expires. Delete permission is unnecessary.
+4. Allow the workflow's preparation job to request `contents: write`, and ensure
+   branch rules permit that bot's ordinary push to `main`. An unprotected
+   personal repository needs no separate GitHub PAT or SSH key in Actions.
+   Keep default workflow permissions restricted: only preparation requests
+   write access. The workflow does not bypass branch protection or enable PR
+   approvals; if rules require every change to use a PR, configure an allowed
+   automation identity before enabling automatic updates.
+
+Scheduled/manual runs use `update_python_manifest.py` and `bazel mod tidy` /
+`bazel mod deps` to prepare stable GIL-enabled GNU `install_only_stripped`
+artifacts for Python 3.13/3.14, with both architectures required. A new Astral
+artifact release at the same Python patch also counts as an update. A missing
+artifact, malformed checksum or Python patch downgrade fails without recording
+partial inputs. A CPython announcement alone is insufficient: the corresponding
+complete Astral release must be available. Java, Debian, Bazel, rules and the
+supported minor list are not automatically upgraded.
+
+Preparation commits only `python_runtimes.MODULE.bazel` and its required
+`MODULE.bazel.lock`, after checks, directly to `main` without a PR or manual
+merge. Unchanged inputs create no empty commit. A normal push rejected by branch
+rules or a concurrent update stops the run; it never force-pushes. A push made
+with `GITHUB_TOKEN` does not trigger another push workflow, so the **same run**
+passes its saved commit SHA to subsequent checks and publication jobs. All
+release jobs use that exact clean checkout. Main push events use committed
+inputs without refreshing Python. Trusted runs select current `main` after
+acquiring the shared publication group, so a queued older event does not select
+an obsolete event SHA.
+
+After regressions, each minor calls `release.sh --channel`, including base and
+JPype/POI execution on both platforms and remote digest/pull checks. Each verified
+index gets its existing immutable commit-derived tag and its
+`3.13-java21-debian13` or `3.14-java21-debian13` channel. No global `latest` is
+created. One minor can succeed while the other fails; the overall workflow then
+fails and the failed minor's channel is not advanced. Publication is not a
+two-minor transaction.
+
+Every successful scheduled/manual preparation proceeds to publication even
+without new inputs. This intentionally repeats builds/checks daily, reuses
+matching immutable content and recovers transient or partial publication failures
+at the next scheduled run, without another commit or operator approval. Manual
+dispatch offers an earlier retry. A different digest at an immutable tag or an
+uncertain registry inspection error stops publication; never delete or overwrite
+the tag to bypass that error.
+
+Schedule, push and manual runs share one concurrency group from source selection
+through publication, and do not cancel an active publisher. PR groups are
+independent. This protects only this repository's CI: local/external publishers
+must not overlap it. Pending runs can be replaced; the group is not a FIFO queue.
+
+GitHub schedules run from the default branch, can be delayed or dropped under
+load, and public repositories can have schedules disabled after 60 days without
+repository activity. Re-enable the workflow in Actions and dispatch it on `main`
+when recovering; this schedule is not a delivery SLA. See GitHub's
+[schedule rules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+and [token trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+Before intentionally rolling source or a channel back, **disable the workflow**
+in Actions. Otherwise its next run selects latest Astral again and refreshes the
+channels. Use the verified digest rollback commands above; preserve immutable
+tags. Re-enable automation when ready to follow upstream again.
+
+For the first hosted run, record its URL, selected/bot commit SHA, both immutable
+tags and index digests, and both channel digests from the logs. Confirm there is
+no approval gate, both platforms execute, and a repeat of the unchanged source
+reuses the same identity. Use the offline update fixtures for rejected pushes and
+failure recovery; do not claim a hosted scenario passed without its actual run.
+
 ## Source review
 
 `.gitignore` excludes Bazel symlinks, Python caches/venvs, `.agents/skills/`, local
@@ -178,6 +269,9 @@ python3 test_python_manifest.py
 python3 test_python_manifest.py --bazel
 python3 test_image_manifest.py
 bash test_release.sh
+python3 test_ci_workflow.py
+python3 test_ci_update.py
+actionlint .github/workflows/ci.yml
 bash -n release.sh smoke_test.sh test_release.sh
 git status --short
 git ls-files --cached --others --exclude-standard

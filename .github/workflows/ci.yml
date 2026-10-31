@@ -1,0 +1,183 @@
+name: Python runtime
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pyva-pr-{0}', github.event.pull_request.number) || 'pyva-publication' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source:
+    if: ${{ github.event.repository.private == false && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name))) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
+          persist-credentials: false
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  refresh:
+    needs: source
+    if: ${{ github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: bazel-contrib/setup-bazel@8cb04a772ab4c1eb984e9c1b493a182e96c5e425 # 0.19.0
+        with:
+          bazelisk-cache: false
+          disk-cache: false
+          repository-cache: false
+          cache-save: false
+      - name: Prepare Python update
+        run: python3 ci_update_python.py
+      - name: Save source before publishing
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          if [[ "$sha" != "$BASE_SHA" ]]; then
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+              git push origin HEAD:refs/heads/main
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: [source, refresh]
+    if: ${{ !cancelled() && github.event.repository.private == false && needs.source.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.refresh.result) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.refresh.outputs.sha || needs.source.outputs.sha }}
+          persist-credentials: false
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: bazel-contrib/setup-bazel@8cb04a772ab4c1eb984e9c1b493a182e96c5e425 # 0.19.0
+        with:
+          bazelisk-cache: false
+          disk-cache: false
+          repository-cache: false
+          cache-save: false
+      - name: Lint workflow
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+      - name: Regressions
+        run: |
+          bash test_repository.sh
+          python3 test_python_manifest.py
+          python3 test_python_manifest.py --bazel
+          python3 test_image_manifest.py
+          bash test_release.sh
+          python3 test_ci_workflow.py
+          python3 test_ci_update.py
+          bash -n release.sh smoke_test.sh test_release.sh
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+  runtime:
+    needs: checks
+    if: ${{ !cancelled() && github.event.repository.private == false && needs.checks.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        minor: ['3.13', '3.14']
+    env:
+      MINOR: ${{ matrix.minor }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.checks.outputs.sha }}
+          persist-credentials: false
+      - name: External Docker configuration
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+      - uses: bazel-contrib/setup-bazel@8cb04a772ab4c1eb984e9c1b493a182e96c5e425 # 0.19.0
+        with:
+          bazelisk-cache: false
+          disk-cache: false
+          repository-cache: false
+          cache-save: false
+      - uses: docker/setup-docker-action@7ec28a010822b4626af4874f9448a4b05ac6f3e5 # v5
+        with:
+          version: v29.8.2
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+          cache-image: false
+      - name: Tool versions
+        run: |
+          bazel version
+          docker version
+          docker buildx version
+          docker buildx inspect --bootstrap
+      - name: Validate pull request images
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          bazel build "//:pyva_runtime_${MINOR//./_}"
+          for arch in amd64 arm64; do
+            bash smoke_test.sh "$MINOR" --arch "$arch"
+            docker build --platform "linux/$arch" --file Dockerfile.poi-smoke \
+              --build-arg "PYTHON_VERSION=$MINOR" \
+              --build-arg "RUNTIME_IMAGE=pyva-runtime:$MINOR-$arch" \
+              --tag "pyva-poi-smoke:$MINOR-$arch" .
+            docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$MINOR-$arch"
+          done
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Check publication configuration
+        if: &publish ${{ github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name) }}
+        env:
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          : "${DOCKERHUB_REPOSITORY:?Set repository variable DOCKERHUB_REPOSITORY}"
+          : "${DOCKERHUB_USERNAME:?Set repository variable DOCKERHUB_USERNAME}"
+      - name: Docker Hub login
+        if: *publish
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish verified images and channel
+        if: *publish
+        env:
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+        run: bash release.sh --channel "$MINOR" "$DOCKERHUB_REPOSITORY"
