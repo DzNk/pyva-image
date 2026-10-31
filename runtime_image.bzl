@@ -61,11 +61,14 @@ def runtime_layers(arch):
         srcs = [":app_dir", ":certs_dir", ":java_" + arch],
     )
 
-def runtime_image(python_version, arch):
+def runtime_image(python_version, arch, cpu_variant = ""):
     """Define a platform image and its separately tagged Docker loader."""
     suffix = python_version.replace(".", "_")
-    name = "pyva_runtime_" + suffix + "_" + arch
-    repo = "@cpython_" + suffix + "_" + arch
+    if cpu_variant not in ["", "v2", "v3"] or (cpu_variant and arch != "amd64"):
+        fail("CPU variants require amd64 and v2 or v3")
+    selection = arch + ("_" + cpu_variant if cpu_variant else "")
+    name = "pyva_runtime_" + suffix + "_" + selection
+    repo = "@cpython_" + suffix + "_" + selection
     executables = [
         "idle" + python_version,
         "pydoc" + python_version,
@@ -119,6 +122,8 @@ def runtime_image(python_version, arch):
         "org.opencontainers.image.version": tag,
         "org.opencontainers.image.base.name": "gcr.io/distroless/static-debian13",
     }
+    if cpu_variant:
+        metadata["io.pyva.cpu.variant"] = cpu_variant
     oci_image(
         name = name,
         base = "@distroless_static_debian13_linux_" + ("arm64_v8" if arch == "arm64" else arch),
@@ -139,21 +144,25 @@ def runtime_image(python_version, arch):
     oci_load(
         name = name + "_load",
         image = ":" + name,
-        repo_tags = ["pyva-runtime:" + python_version + "-" + arch] + (
-            ["pyva-runtime:" + python_version, "pyva-runtime:" + tag] if arch == "amd64" else []
+        repo_tags = ["pyva-runtime:" + python_version + "-" + selection.replace("_", "-")] + (
+            ["pyva-runtime:" + python_version, "pyva-runtime:" + tag] if arch == "amd64" and not cpu_variant else []
         ),
     )
 
-def runtime_index(python_version):
-    """Publish both platform images together; release.sh supplies remote tags."""
-    name = "pyva_runtime_" + python_version.replace(".", "_")
+def runtime_index(python_version, cpu_variant = ""):
+    """Publish the default pair or one explicit CPU image; release.sh sets tags."""
+    if cpu_variant not in ["", "v2", "v3"]:
+        fail("CPU variant must be v2 or v3")
+    root = "pyva_runtime_" + python_version.replace(".", "_")
+    name = root + ("_amd64_" + cpu_variant + "_index" if cpu_variant else "")
     oci_image_index(
         name = name,
-        images = [":" + name + "_amd64", ":" + name + "_arm64"],
+        images = [":" + root + "_amd64_" + cpu_variant] if cpu_variant else [":" + root + "_amd64", ":" + root + "_arm64"],
     )
     oci_push(name = name + "_push", image = ":" + name)
-    oci_load(
-        name = name + "_load",
-        image = ":" + name + "_amd64",
-        repo_tags = ["pyva-runtime:" + python_version, "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java21-debian13"],
-    )
+    if not cpu_variant:
+        oci_load(
+            name = name + "_load",
+            image = ":" + name + "_amd64",
+            repo_tags = ["pyva-runtime:" + python_version, "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java21-debian13"],
+        )

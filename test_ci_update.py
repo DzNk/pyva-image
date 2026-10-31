@@ -51,8 +51,9 @@ def scenario(case):
             if case == "downgrade":
                 candidate_patch = 8
             data = records(candidate_tag, candidate_patch)
-            if case == "missing-arch":
-                data = "\n".join(data.splitlines()[:-1])
+            if case.startswith("missing-"):
+                target = updater.PLATFORMS[case.removeprefix("missing-")]
+                data = "\n".join(line for line in data.splitlines() if f"-{target}-" not in line)
             if case == "bad-checksum":
                 data = data.replace("a" * 64, "bad")
 
@@ -81,7 +82,7 @@ def scenario(case):
                     ci.main()
             except (ValueError, subprocess.CalledProcessError):
                 failed = True
-            invalid = case in ("downgrade", "missing-arch", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check")
+            invalid = case.startswith("missing-") or case in ("downgrade", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check")
             assert failed == invalid, case
             if invalid:
                 assert real_run("git", "rev-parse", "HEAD").strip() == before
@@ -120,6 +121,6 @@ def scenario(case):
             os.chdir(original_cwd)
 
 
-for case in ("update", "no-change", "astral-rebuild", "downgrade", "missing-arch", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main"):
+for case in ("update", "no-change", "astral-rebuild", "downgrade", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main", *("missing-" + arch for arch in updater.PLATFORMS)):
     scenario(case)
 print("CI update passed: numeric patches, atomic inputs, real Git push, no-change/retry and rejected/concurrent writes")

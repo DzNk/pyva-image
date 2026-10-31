@@ -25,14 +25,14 @@ checksums = "\n".join([
     record("3.14.10"), record("3.14.11rc1"),
     record("3.14.10", "aarch64-unknown-linux-gnu"),
     record("3.14.11", "x86_64-unknown-linux-musl"),
-    record("3.14.11", "x86_64_v3-unknown-linux-gnu"),
+    record("3.14.11", "x86_64_v4-unknown-linux-gnu"),
     record("3.14.11", "x86_64-unknown-linux-gnu-freethreaded"),
     record("3.14.10", flavor="install_only", sha="b" * 64),
-])
+] + [record(version, target) for version in ("3.13.15", "3.14.10")
+     for arch, target in PLATFORMS.items() if arch.startswith("amd64_v")])
 selected = manifest(tag, checksums)
 assert [(v, arch) for v, arch, _, _ in selected] == [
-    ("3.13.15", "amd64"), ("3.13.15", "arm64"),
-    ("3.14.10", "amd64"), ("3.14.10", "arm64"),
+    (v, arch) for v in ("3.13.15", "3.14.10") for arch in PLATFORMS
 ]
 assert manifest(tag, "\n".join(reversed(checksums.splitlines()))) == selected
 assert all(f"/download/{tag}/" in url for _, _, url, _ in selected)
@@ -44,7 +44,8 @@ assert '\n\n# Build tools use a catalog runtime' in contents
 assert contents == render(manifest(tag, checksums))
 assert 'minor_mapping = {\n    "3.13": "3.13.15",\n    "3.14": "3.14.10",\n}' in contents
 assert "available_python_versions" not in contents
-assert contents.count("python.single_version_platform_override(") == 4
+assert contents.count("python.single_version_platform_override(") == 8
+assert contents.count('target_compatible_with = ["@platforms//:incompatible"]') == 4
 assert 'python.toolchain(python_version = "3.13")' in contents
 assert 'python.toolchain(python_version = "3.14")' in contents
 for version, arch, url, sha in selected:
@@ -70,7 +71,8 @@ with tempfile.TemporaryDirectory() as directory:
                                 record("3.14.10", "aarch64-unknown-linux-gnu", flavor="install_only"))),
         (tag, record("3.13.15") + "\n" + record("3.14.11rc1")),
         (tag, record("3.13.15") + "\n" + record("3.14.10", "aarch64-unknown-linux-gnu")),
-    ]:
+    ] + [(tag, checksums.replace(record(version, target), ""))
+         for version in ("3.13.15", "3.14.10") for target in PLATFORMS.values()]:
         try:
             refresh(release_tag, data, destination)
         except ValueError:
@@ -97,9 +99,8 @@ if sys.argv[1:] == ["--bazel"]:
     # Both patches exist below the built-in latest versions.
     # Synthetic saved metadata overrides URL/hash; show_repo downloads no interpreter.
     saved = manifest(tag, "\n".join([
-        record("3.13.12"), record("3.14.3"),
-        record("3.13.12", "aarch64-unknown-linux-gnu"),
-        record("3.14.3", "aarch64-unknown-linux-gnu"),
+        record(version, target) for version in ("3.13.12", "3.14.3") for target in PLATFORMS.values()
+    ] + [
         record("3.13.12", flavor="install_only", sha="b" * 64),
         record("3.14.3", flavor="install_only", sha="b" * 64),
     ]))
@@ -111,8 +112,8 @@ if sys.argv[1:] == ["--bazel"]:
         (project / "python_runtimes.MODULE.bazel").write_text(render(saved))
         resolved = subprocess.run(
             ["bazel", "--batch", f"--output_base={project / 'output'}", "mod", "show_repo",
-             "@pythons_hub", "@cpython_3_13_amd64", "@cpython_3_13_arm64",
-             "@cpython_3_14_amd64", "@cpython_3_14_arm64", "--lockfile_mode=off"],
+             "@pythons_hub"] + [f"@cpython_{minor}_{arch}" for minor in ("3_13", "3_14") for arch in PLATFORMS]
+            + ["--lockfile_mode=off"],
             cwd=project, text=True, capture_output=True,
         )
         if resolved.returncode:
@@ -123,6 +124,7 @@ if sys.argv[1:] == ["--bazel"]:
             "3.13": "3.13.12", "3.14": "3.14.3",
         }, mapping
         assert "3.11" in mapping, mapping
+        assert "@platforms//:incompatible" in result
         for version, arch, url, sha in saved:
             minor = version.rsplit(".", 1)[0].replace(".", "_")
             repo = result.split(f"## @cpython_{minor}_{arch}:")[1].split("\n## ")[0]

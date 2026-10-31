@@ -29,7 +29,7 @@ def rejected(operation):
         raise AssertionError("invalid candidate accepted")
 
 
-def layout(root, minor, layers):
+def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None):
     blobs = root / "blobs/sha256"
     blobs.mkdir(exist_ok=True, parents=True)
 
@@ -40,13 +40,17 @@ def layout(root, minor, layers):
         return {"digest": "sha256:" + sha, "size": len(raw)}
 
     children = []
-    for arch in ("amd64", "arm64"):
+    for arch in (arches if arches is not None else (("amd64",) if cpu else ("amd64", "arm64"))):
         descriptors = [dict(save(data), mediaType="application/vnd.oci.image.layer.v1.tar" + ("+gzip" if data.startswith(b"\x1f\x8b") else "")) for data in layers]
+        metadata = {"org.opencontainers.image.version": minor + ".99-java21-debian13"}
+        if cpu:
+            metadata["io.pyva.cpu.variant"] = cpu if label is None else label
         config = save({"os": "linux", "architecture": arch, "config": {
-            "Labels": {"org.opencontainers.image.version": minor + ".99-java21-debian13"}},
+            "Labels": metadata},
             "rootfs": {"type": "layers", "diff_ids": ["sha256:" + hashlib.sha256(gzip.decompress(data) if data.startswith(b"\x1f\x8b") else data).hexdigest() for data in layers]}})
         config["mediaType"] = "application/vnd.oci.image.config.v1+json"
-        child = save({"schemaVersion": 2, "config": config, "layers": descriptors})
+        annotations = {"io.pyva.cpu.variant": cpu if annotation is None else annotation} if cpu else {}
+        child = save({"schemaVersion": 2, "config": config, "layers": descriptors, "annotations": annotations})
         child["mediaType"] = "application/vnd.oci.image.manifest.v1+json"
         child["platform"] = {"os": "linux", "architecture": arch}
         children.append(child)
@@ -95,4 +99,19 @@ with tempfile.TemporaryDirectory() as directory:
         layout(root, minor, [good])
         (root / "blobs/sha256" / hashlib.sha256(good).hexdigest()).write_bytes(b"corrupted")
         rejected(lambda: local(root, minor))
+        for cpu in ("v2", "v3"):
+            layout(root, minor, [good], cpu)
+            assert local(root, minor, cpu)[0] == minor + ".99-java21-debian13-amd64-" + cpu
+            rejected(lambda: local(root, minor))
+            layout(root, minor, [good])
+            rejected(lambda: local(root, minor, cpu))
+            for kwargs in ({"arches": ("amd64", "arm64")}, {"arches": ()},
+                           {"label": "v1"}, {"annotation": "v1"}, {"label": "v3" if cpu == "v2" else "v2"}):
+                layout(root, minor, [good], cpu, **kwargs)
+                rejected(lambda: local(root, minor, cpu))
+            layout(root, minor, [tar([forbidden[0]]), good], cpu)
+            rejected(lambda: local(root, minor, cpu))
+            layout(root, minor, [good], cpu)
+            (root / "blobs/sha256" / hashlib.sha256(good).hexdigest()).write_bytes(b"corrupted")
+            rejected(lambda: local(root, minor, cpu))
 print("OCI policy passed: every layer, gzip, hidden installers, retained dependencies and integrity")

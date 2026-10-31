@@ -1,27 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() { echo "usage: $0 3.13|3.14 [--arch amd64|arm64] [image-reference]" >&2; exit 2; }
+usage() { echo "usage: $0 3.13|3.14 [--arch amd64|arm64] [--cpu v2|v3] [image-reference]" >&2; exit 2; }
 (( $# >= 1 )) && [[ "$1" =~ ^3\.(13|14)$ ]] || usage
 minor="$1"
 shift
 arch=amd64
-if [[ "${1:-}" == --arch ]]; then
+cpu=
+while [[ "${1:-}" == --* ]]; do
   (( $# >= 2 )) || usage
-  arch="$2"
+  case "$1" in
+    --arch) arch="$2" ;;
+    --cpu) [[ "$2" == v2 || "$2" == v3 ]] || usage; cpu="$2" ;;
+    *) usage ;;
+  esac
   shift 2
-fi
+done
 [[ "$arch" == amd64 || "$arch" == arm64 ]] && (( $# <= 1 )) || usage
-image="${1:-pyva-runtime:${minor}-${arch}}"
+[[ -z "$cpu" || "$arch" == amd64 ]] || usage
+selection="$arch${cpu:+-$cpu}"
+image="${1:-pyva-runtime:${minor}-${selection}}"
+if [[ -n "$cpu" ]]; then python3 cpu_check.py "$cpu"; fi
 
 if (( $# == 0 )); then
-  target="pyva_runtime_${minor//./_}_${arch}_load"
+  target="pyva_runtime_${minor//./_}_${selection//-/_}_load"
   bazel build "//:${target}" --output_groups=tarball
   docker load --input "bazel-bin/${target}/tarball.tar"
 fi
 
 platform="$(docker image inspect --platform "linux/${arch}" --format '{{.Os}}/{{.Architecture}}' "$image")"
 identity="$(docker image inspect --platform "linux/${arch}" --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")"
+cpu_identity="$(docker image inspect --platform "linux/${arch}" --format '{{index .Config.Labels "io.pyva.cpu.variant"}}' "$image")"
+if [[ -n "$cpu" ]]; then
+  [[ "$cpu_identity" == "$cpu" ]] || { echo 'CPU variant differs from selected image' >&2; exit 1; }
+else
+  [[ -z "$cpu_identity" || "$cpu_identity" == '<no value>' || "$cpu_identity" == v1 ]] || { echo 'Optimized image cannot substitute baseline' >&2; exit 1; }
+fi
 if [[ "$platform" != "linux/${arch}" || ! "$identity" =~ ^3\.(13|14)\.[0-9]+-java21-debian13$ || "$identity" != "$minor".* ]]; then
   echo "unexpected image identity: ${identity} (${platform}), expected Python ${minor} on linux/${arch}" >&2
   exit 1

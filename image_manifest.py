@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Read native OCI layouts and verify Docker buildx registry descriptors."""
+import argparse
 import hashlib
 import io
 import json
@@ -43,20 +44,29 @@ def digest(value):
     return value
 
 
-def children(index):
+def cpu_identity(metadata, cpu):
+    actual = metadata.get("io.pyva.cpu.variant", "")
+    if (cpu and actual != cpu) or (not cpu and actual not in ("", "v1")):
+        raise ValueError("CPU identity differs from selected variant")
+
+
+def children(index, cpu=""):
+    if cpu not in ("", "v2", "v3"):
+        raise ValueError("CPU variant must be v2 or v3")
+    expected = {"amd64"} if cpu else {"amd64", "arm64"}
     result = {}
     for child in index["manifests"]:
         platform = child["platform"]
         arch = platform["architecture"]
-        if platform["os"] != "linux" or arch not in ("amd64", "arm64") or arch in result:
-            raise ValueError("index must contain exactly linux/amd64 and linux/arm64")
+        if platform["os"] != "linux" or arch not in expected or arch in result:
+            raise ValueError("index platform set differs from selected release")
         result[arch] = digest(child["digest"])
-    if set(result) != {"amd64", "arm64"}:
+    if set(result) != expected:
         raise ValueError("incomplete platform index")
     return result
 
 
-def local(root, minor):
+def local(root, minor, cpu=""):
     def blob(descriptor):
         expected = digest(descriptor["digest"])
         data = (root / "blobs/sha256" / expected.split(":")[1]).read_bytes()
@@ -66,13 +76,15 @@ def local(root, minor):
 
     descriptor, = json.loads((root / "index.json").read_text())["manifests"]
     index = json.loads(blob(descriptor))
-    child_digests = children(index)
+    child_digests = children(index, cpu)
     versions = set()
     configs = {}
     for child in index["manifests"]:
         arch = child["platform"]["architecture"]
         manifest = json.loads(blob(child))
         config = json.loads(blob(manifest["config"]))
+        cpu_identity(config["config"]["Labels"], cpu)
+        cpu_identity(manifest.get("annotations", {}), cpu)
         if not manifest["layers"]:
             raise ValueError("candidate has no filesystem layers")
         for layer in manifest["layers"]:
@@ -86,28 +98,37 @@ def local(root, minor):
         configs[arch] = digest(manifest["config"]["digest"])
     if len(versions) != 1:
         raise ValueError("platform Python identities differ")
-    return [versions.pop(), digest(descriptor["digest"])] + [child_digests[a] for a in ("amd64", "arm64")] + [configs[a] for a in ("amd64", "arm64")]
+    arches = ("amd64",) if cpu else ("amd64", "arm64")
+    family = versions.pop() + ("-amd64-" + cpu if cpu else "")
+    return [family, digest(descriptor["digest"])] + [child_digests[a] for a in arches] + [configs[a] for a in arches]
 
 
 def main():
-    if sys.argv[1] == "local":
-        print(" ".join(local(Path(sys.argv[2]), sys.argv[3])))
-    elif sys.argv[1] == "remote":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cpu", choices=("v2", "v3"), default="")
+    parser.add_argument("mode", choices=("local", "remote", "loaded"))
+    parser.add_argument("args", nargs="+")
+    params = parser.parse_intermixed_args()
+    if params.mode == "local":
+        root, minor = params.args
+        print(" ".join(local(Path(root), minor, params.cpu)))
+    elif params.mode == "remote":
         descriptor = json.load(sys.stdin)
-        expected = [digest(d) for d in sys.argv[2:]]
-        actual = children(descriptor)
-        if [digest(descriptor["digest"]), actual["amd64"], actual["arm64"]] != expected:
+        expected = [digest(d) for d in params.args]
+        actual = children(descriptor, params.cpu)
+        arches = ("amd64",) if params.cpu else ("amd64", "arm64")
+        if [digest(descriptor["digest"])] + [actual[a] for a in arches] != expected:
             raise ValueError("remote index/child digests differ from validated candidate")
-    elif sys.argv[1] == "loaded":
+    elif params.mode == "loaded":
         # Containerd-backed Docker may report a converted manifest as .Id.
-        config = json.loads((Path(sys.argv[2]) / "blobs/sha256" / digest(sys.argv[3]).split(":")[1]).read_text())
+        root, config_digest = params.args
+        config = json.loads((Path(root) / "blobs/sha256" / digest(config_digest).split(":")[1]).read_text())
+        cpu_identity(config["config"]["Labels"], params.cpu)
         loaded = json.load(sys.stdin)
         if (loaded["Os"], loaded["Architecture"], loaded["Config"], loaded["RootFS"]["Layers"]) != (
             config["os"], config["architecture"], config["config"], config["rootfs"]["diff_ids"]
         ):
             raise ValueError("loaded configuration/layer digests differ from candidate")
-    else:
-        raise ValueError("expected local, remote or loaded mode")
 
 
 if __name__ == "__main__":

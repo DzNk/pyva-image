@@ -11,6 +11,9 @@
 
 Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
 платформы **linux/amd64** и **linux/arm64**.
+Для совместимых x86-64 CPU доступны отдельные теги
+`3.13-java21-debian13-amd64-v2` / `-v3` (также для 3.14).
+Выбор явный; общий образ остаётся baseline amd64 + arm64, ускорение не гарантируется.
 Запуск от UID/GID `65532`, рабочая папка `/app`; без shell и пакетного менеджера.
 Python-зависимости и Java JAR-файлы добавляет приложение; JPype и POI не включены.
 pip, ensurepip и setuptools отсутствуют; зависимости готовятся в отдельном builder.
@@ -27,6 +30,9 @@ for example, processing documents with Apache POI.
 
 Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
 platforms **linux/amd64** and **linux/arm64**.
+Compatible x86-64 CPUs can use explicit tags
+`3.13-java21-debian13-amd64-v2` / `-v3` (also for 3.14).
+The shared image retains baseline amd64 + arm64; a speedup is not guaranteed.
 Runs as UID/GID `65532` in `/app`, without a shell or package manager.
 The application supplies Python dependencies and Java JARs; JPype and POI are not bundled.
 pip, ensurepip and setuptools are absent; prepare dependencies in a separate builder.

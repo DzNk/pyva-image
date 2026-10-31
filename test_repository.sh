@@ -20,6 +20,7 @@ for path in .bazelversion .gitignore .dockerignore .env.example \
   Dockerfile.poi-smoke poi-smoke-pom.xml poi_smoke.py \
   release.sh smoke_test.sh test_python_manifest.py image_manifest.py test_image_manifest.py test_release.sh test_repository.sh \
   .github/workflows/ci.yml ci_update_python.py test_ci_workflow.py test_ci_update.py CONTRIBUTING.md \
+  cpu_check.py test_cpu_check.py \
   openspec/config.yaml openspec/specs/python-jvm-runtime-image/spec.md \
   openspec/changes/archive/2026-10-01-build-python-jvm-golden-image/.openspec.yaml \
   openspec/changes/prepare-git-publication/tasks.md \

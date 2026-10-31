@@ -8,7 +8,12 @@ import urllib.request
 
 
 MINORS = ("3.13", "3.14")
-PLATFORMS = {"amd64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"}
+PLATFORMS = {
+    "amd64": "x86_64-unknown-linux-gnu",
+    "arm64": "aarch64-unknown-linux-gnu",
+    "amd64_v2": "x86_64_v2-unknown-linux-gnu",
+    "amd64_v3": "x86_64_v3-unknown-linux-gnu",
+}
 LATEST = "https://raw.githubusercontent.com/astral-sh/python-build-standalone/latest-release/latest-release.json"
 RELEASES = "https://github.com/astral-sh/python-build-standalone/releases/download"
 OUTPUT = pathlib.Path(__file__).with_name("python_runtimes.MODULE.bazel")
@@ -24,15 +29,16 @@ def manifest(tag, checksums):
             continue
         match = re.fullmatch(
             r"cpython-((?:3\.13|3\.14)\.[0-9]+)\+"
-            + tag + r"-(x86_64|aarch64)-unknown-linux-gnu-(install_only(?:_stripped)?)\.tar\.gz",
+            + tag + "-(" + "|".join(re.escape(p) for p in PLATFORMS.values())
+            + r")-(install_only(?:_stripped)?)\.tar\.gz",
             fields[-1],
         )
         if not match:
             continue
         if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{64}", fields[0]):
             raise ValueError(f"invalid SHA-256 record: {line}")
-        version, cpu, flavor = match.groups()
-        arch = "amd64" if cpu == "x86_64" else "arm64"
+        version, target, flavor = match.groups()
+        arch = next(arch for arch, platform in PLATFORMS.items() if platform == target)
         key = (version, arch, flavor)
         record = (version, arch, f"{RELEASES}/{tag}/{fields[1]}", fields[0])
         if key in records and records[key] != record:
@@ -65,12 +71,14 @@ def render(runtimes):
         content += f'    "{version.rsplit(".", 1)[0]}": "{version}",\n'
     content += "})\n"
     for version, arch, url, sha in runtimes:
+        constraints = '    target_compatible_with = ["@platforms//:incompatible"],\n' if arch.startswith("amd64_v") else ""
         content += (
             "python.single_version_platform_override(\n"
             f'    platform = "{PLATFORMS[arch]}",\n'
             f'    python_version = "{version}",\n'
             f'    sha256 = "{sha}",\n'
             '    strip_prefix = "python",\n'
+            f"{constraints}"
             f"    urls = [{json.dumps(url)}],\n"
             ")\n"
         )

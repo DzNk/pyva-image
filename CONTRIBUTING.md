@@ -6,7 +6,7 @@ Bazel uses the version in `.bazelversion`. `MODULE.bazel` pins a Distroless Debi
 13 OCI index and the Debian snapshot `20250901T000000Z` for both amd64 and arm64.
 Build tools use the catalog Python 3.12 toolchain on the build host; image
 interpreters remain the explicitly pinned Linux Python 3.13/3.14 artifacts.
-The generated Python fragment pins one stable patch per minor, four immutable
+The generated Python fragment pins one stable patch per minor, eight immutable
 Astral URLs and SHA-256 checksums. Ordinary builds never resolve `latest`.
 
 ```sh
@@ -17,17 +17,23 @@ python3 test_python_manifest.py
 python3 test_python_manifest.py --bazel
 ```
 
-The updater selects the highest stable patch for each minor, then requires both
-GNU/GIL-enabled `install_only_stripped` archives. Missing either architecture
+The updater selects the highest stable patch for each minor, then requires all
+four GNU/GIL-enabled `install_only_stripped` archives: baseline amd64, arm64,
+amd64-v2 and amd64-v3. Missing any architecture or CPU selection
 fails atomically without choosing an older patch. Commit the fragment and lock
 changes together. Native rules_python overrides prevent catalog substitution.
+Optimized repositories have incompatible toolchain constraints and are used
+explicitly for image packaging; they never replace the Python 3.12 build host
+or default baseline toolchains. All four selections share the same patch and
+Astral release per minor. An absent v2/v3 artifact blocks the whole refresh;
+previously saved inputs remain available, without downgrade or baseline fallback.
 The stripped inputs omit native debug symbols; Python tracebacks still work.
 There is no local strip step. Restore the updater and fragment together to roll
 back the policy, and publish under a new commit-derived tag.
 
 ## Build and execute
 
-There are four explicit image/load targets and two native OCI index targets.
+There are eight explicit image/load targets and six native OCI index targets.
 The index targets `//:pyva_runtime_3_13` and `//:pyva_runtime_3_14` each contain
 both platforms. Debian Java closures and `JAVA_HOME` use the selected architecture.
 
@@ -68,6 +74,37 @@ use a native runner or existing Docker emulation. Docker must support
 in a multi-platform image store. Scripts do not install binfmt
 or skip ARM failures. The POI check installs target-platform JPype1 1.7.1 and
 Apache POI 5.4.1 in builder stages, writes XLSX and checks its ZIP structure.
+
+## Explicit amd64 CPU variants
+
+The default build/load targets above still produce baseline amd64 and arm64.
+Additional optimized CPython variants reuse the same amd64 Distroless, Debian,
+Java and metadata layers; only their Python layers and CPU metadata differ.
+Each optimized image remains `linux/amd64` and exposes label/annotation
+`io.pyva.cpu.variant=v2` or `v3`. Select it by its explicit tag; neither automatic
+CPU selection via `--platform` nor fallback on older CPUs is provided.
+
+```sh
+bazel build //:pyva_runtime_3_13 //:pyva_runtime_3_14 \
+  //:pyva_runtime_3_13_amd64_v2_index //:pyva_runtime_3_13_amd64_v3_index \
+  //:pyva_runtime_3_14_amd64_v2_index //:pyva_runtime_3_14_amd64_v3_index
+bash smoke_test.sh 3.13 --arch amd64 --cpu v2
+bash smoke_test.sh 3.14 --cpu v3
+```
+
+The corresponding image/load targets are `//:pyva_runtime_3_13_amd64_v2`
+and `//:pyva_runtime_3_13_amd64_v2_load` (similarly for v3/3.14). Local tags are
+`pyva-runtime:3.13-amd64-v2`, `:3.13-amd64-v3`, `:3.14-amd64-v2`, and
+`:3.14-amd64-v3`; loading these never replaces baseline aliases.
+
+Optimized execution requires a native Linux x86-64 glibc runner supporting the
+requested CPU level. `python3 cpu_check.py v3` uses glibc's hwcaps check, including
+CPU and OS-enabled SIMD/AVX state, and records `/proc/cpuinfo` flags. Missing
+capabilities fail validation before running an incompatible image. v2 requires
+the x86-64-v2 instruction set, and v3 additionally requires AVX/AVX2 and related
+features; see the [architecture requirements](https://go.dev/wiki/MinimumRequirements#amd64).
+An optimized artifact is not a promise of measured speedup; compare your workload
+on baseline/v2/v3 when choosing an image.
 
 ## Downstream dependencies and certificates
 
@@ -149,6 +186,27 @@ and checking equality. Default releases leave channels alone; no global `latest`
 The preflight assumes one publisher per repository/tag. Serialize concurrent
 publishers; Docker Hub offers no compare-and-set tag update.
 
+For an optimized release, explicitly select the CPU level:
+
+```sh
+bash release.sh --channel --cpu v2 3.13 docker.io/<namespace>/pyva-runtime
+bash release.sh --cpu v3 --channel 3.14 docker.io/<namespace>/pyva-runtime
+```
+
+These publish one-entry amd64 OCI indexes. Immutable tags are
+`X.Y.Z-java21-debian13-amd64-vN-YYYYMMDDTHHMMSSZ-g<full-commit-SHA>` and their
+explicitly requested channels are `X.Y-java21-debian13-amd64-vN` (`N=2` or `3`).
+Omitting CPU selection retains the original two-platform release, tags and checks.
+A command changes only its selected minor/CPU tags. Every selection retains
+clean-source, exact input identity, installer-exclusion, base/POI, immutable
+collision, remote digest and pull/run gates before channel promotion. To inspect
+CPU identity after pulling the selected tag, use
+`docker image inspect --format '{{index .Config.Labels "io.pyva.cpu.variant"}}' <image>`.
+Consumers explicitly choose the tag, for example
+`FROM docker.io/<namespace>/pyva-runtime:3.14-java21-debian13-amd64-v3`.
+Rollback uses the same digest-copy command below with the CPU-specific channel;
+disable automation first and preserve immutable tags.
+
 ```sh
 docker pull --platform linux/arm64 <repository>:<dated-immutable-tag>
 docker pull --platform linux/amd64 <repository>@sha256:<verified-index-digest>
@@ -168,7 +226,8 @@ The `Python runtime` workflow in `.github/workflows/ci.yml` checks pull requests
 to `main`, publishes pushes to `main`, and checks Astral daily at **04:23 UTC**.
 Use **Actions → Python runtime → Run workflow → main** to start it immediately.
 Other branches/tags cannot refresh inputs, authenticate to Docker Hub or publish.
-PRs, including forks, run regressions and both Python minors on amd64/arm64
+PRs, including forks, run regressions and all eight variants (both Python minors,
+each with baseline amd64/arm64 and explicit amd64-v2/v3)
 without repository writes or publishing credentials.
 
 One-time setup for a public GitHub repository and public Docker Hub repository:
@@ -196,7 +255,7 @@ One-time setup for a public GitHub repository and public Docker Hub repository:
 
 Scheduled/manual runs use `update_python_manifest.py` and `bazel mod tidy` /
 `bazel mod deps` to prepare stable GIL-enabled GNU `install_only_stripped`
-artifacts for Python 3.13/3.14, with both architectures required. A new Astral
+artifacts for Python 3.13/3.14, with all four architecture/CPU selections required. A new Astral
 artifact release at the same Python patch also counts as an update. A missing
 artifact, malformed checksum or Python patch downgrade fails without recording
 partial inputs. A CPython announcement alone is insufficient: the corresponding
@@ -214,13 +273,19 @@ inputs without refreshing Python. Trusted runs select current `main` after
 acquiring the shared publication group, so a queued older event does not select
 an obsolete event SHA.
 
-After regressions, each minor calls `release.sh --channel`, including base and
-JPype/POI execution on both platforms and remote digest/pull checks. Each verified
-index gets its existing immutable commit-derived tag and its
-`3.13-java21-debian13` or `3.14-java21-debian13` channel. No global `latest` is
-created. One minor can succeed while the other fails; the overall workflow then
-fails and the failed minor's channel is not advanced. Publication is not a
-two-minor transaction.
+After regressions, the runtime matrix is two minors × `baseline`, `v2`, `v3`:
+six jobs build and verify eight images and publish six indexes. Every main push
+starts this hosted build/publication automatically, including the first CPU
+variant implementation push; manual dispatch is optional recovery, not a
+prerequisite. Each job calls `release.sh --channel` with its explicit CPU flag
+when applicable. Baseline jobs execute amd64 and arm64, optimized jobs execute
+one compatible native amd64 image with recorded CPU/OS capabilities. Missing
+capabilities fail the job rather than skipping it. All retain base/JPype/POI and
+remote digest/pull checks. Channels are the existing minor channels plus
+`X.Y-java21-debian13-amd64-v2` and `-v3`; no global `latest` is created. One
+selection can succeed while another fails: the overall run then fails, and the
+failed selection's channel is not advanced. Publication is not a six-selection
+transaction.
 
 Every successful scheduled/manual preparation proceeds to publication even
 without new inputs. This intentionally repeats builds/checks daily, reuses
@@ -247,9 +312,9 @@ in Actions. Otherwise its next run selects latest Astral again and refreshes the
 channels. Use the verified digest rollback commands above; preserve immutable
 tags. Re-enable automation when ready to follow upstream again.
 
-For the first hosted run, record its URL, selected/bot commit SHA, both immutable
-tags and index digests, and both channel digests from the logs. Confirm there is
-no approval gate, both platforms execute, and a repeat of the unchanged source
+For the first hosted run, record its URL, selected/bot commit SHA, all six immutable
+tags/index digests and corresponding channel digests from the logs. Confirm there is
+no approval gate, all eight variants execute, and a repeat of the unchanged source
 reuses the same identity. Use the offline update fixtures for rejected pushes and
 failure recovery; do not claim a hosted scenario passed without its actual run.
 
@@ -269,6 +334,7 @@ python3 test_python_manifest.py
 python3 test_python_manifest.py --bazel
 python3 test_image_manifest.py
 bash test_release.sh
+python3 test_cpu_check.py
 python3 test_ci_workflow.py
 python3 test_ci_update.py
 actionlint .github/workflows/ci.yml

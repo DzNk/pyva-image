@@ -50,6 +50,7 @@ def check(text):
     assert "needs.checks.outputs.sha" in jobs["runtime"]
     assert "github.event_name == 'pull_request' && github.sha || 'main'" in jobs["source"]
     assert "minor: ['3.13', '3.14']" in text and "fail-fast: false" in text
+    assert "cpu: [baseline, v2, v3]" in text and "CPU: ${{ matrix.cpu }}" in text
     assert "version: v29.8.2" in text and '"containerd-snapshotter":true' in text
     assert "platforms: arm64" in text and "cache-image: false" in text
     for action in re.findall(r"uses: (\S+)", text):
@@ -62,7 +63,7 @@ def check(text):
     assert "if: *publish" in step(text, "Docker Hub login")
     assert "password: ${{ secrets.DOCKERHUB_TOKEN }}" in step(text, "Docker Hub login")
     assert "if: *publish" in step(text, "Publish verified images and channel")
-    assert 'run: bash release.sh --channel "$MINOR" "$DOCKERHUB_REPOSITORY"' in text
+    assert 'bash release.sh --channel "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY"' in text
     assert "if: ${{ github.event_name == 'pull_request' }}" in step(text, "Validate pull request images")
     assert "GH_TOKEN:" in step(text, "Save source before publishing")
     assert text.count("GH_TOKEN:") == 1 and "persist-credentials: true" not in text
@@ -96,4 +97,29 @@ if __name__ == "__main__":
             **os.environ, "DOCKERHUB_REPOSITORY": destination, "DOCKERHUB_USERNAME": username,
         })
         assert (result.returncode == 0) == bool(destination and username)
+    # Execute the actual publish shell for every matrix selection, without registry writes.
+    executions = 0
+    for cpu in ("baseline", "v2", "v3"):
+        for minor in ("3.13", "3.14"):
+            command = shell(workflow, "Publish verified images and channel")
+            result = subprocess.run(["bash", "-e", "-c",
+                'bash() { printf "%s\\n" "$*"; };\n' + command], capture_output=True, text=True,
+                env={**os.environ, "CPU": cpu, "MINOR": minor, "DOCKERHUB_REPOSITORY": "docker.io/example/runtime"})
+            expected = "release.sh --channel " + ("" if cpu == "baseline" else f"--cpu {cpu} ") + f"{minor} docker.io/example/runtime"
+            assert result.returncode == 0 and result.stdout.strip() == expected, result
+            pr_command = shell(workflow, "Validate pull request images")
+            stubs = '''
+bazel() { :; }
+python3() { :; }
+bash() { printf '%s\\n' "$*"; }
+docker() { :; }
+git() { :; }
+'''
+            result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", stubs + pr_command], capture_output=True, text=True,
+                env={**os.environ, "CPU": cpu, "MINOR": minor})
+            expected_arches = ("amd64", "arm64") if cpu == "baseline" else ("amd64",)
+            expected_calls = [f"smoke_test.sh {minor} --arch {arch}" + ("" if cpu == "baseline" else f" --cpu {cpu}") for arch in expected_arches]
+            assert result.returncode == 0 and result.stdout.splitlines() == expected_calls, result
+            executions += len(expected_calls)
+    assert executions == 8
     print("Workflow policy passed: public/main guards, isolated credentials, frozen SHA and serialized publishers")
