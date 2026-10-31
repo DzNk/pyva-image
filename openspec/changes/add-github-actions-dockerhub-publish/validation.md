@@ -44,8 +44,22 @@ repository/default branch `main` were verified; `main` is not protected.
 
 ## Hosted activation and verification
 
-At local validation time no GitHub run or Docker Hub authentication/publication
-has been claimed. The user's variables/secret are consumed only by a trusted
+The real updater/preparation command also passed in an isolated checkout of
+implementation commit `eb49aee80fdb91ca9c71a4a39ac7524974e96dae`, including live
+Astral metadata, Bazel tidy/deps and all preparation regressions. It found no
+new inputs, created no commit and left that checkout clean. No push was made
+from the isolated checkout.
+
+First hosted run:
+<https://github.com/DzNk/pyva-image/actions/runs/41193349336> (main push of
+`eb49aee80fdb91ca9c71a4a39ac7524974e96dae`). Source selection, workflow lint and
+all regressions passed; refresh correctly skipped. Runtime publication was
+still running at this observation. GitHub reported a Node 20 deprecation warning
+for checkout v4; follow-up pins checkout v6 and Docker QEMU/login v4, whose
+official action metadata declares `node24`.
+
+Docker Hub authentication/publication has not yet been claimed successful at
+this observation. The user's variables/secret are consumed only by a trusted
 hosted run; their values are not retrieved or printed locally.
 
 1. Push the reviewed workflow to `main` and record the actual run URL and source
