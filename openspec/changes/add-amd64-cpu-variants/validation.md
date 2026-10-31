@@ -67,9 +67,61 @@ regressions, CI workflow/update tests, actionlint 1.7.12, shell syntax checks,
 strict OpenSpec validation and whitespace review. The saved inputs used for
 runtime and layer measurements match the final shipping selection.
 
-Hosted publication is required by task 5.2 and is not yet claimed at this local
-checkpoint. The implementation push to `main` must itself start the run, without
-manual dispatch or a local release replacing it. Record the run URL, exact source
-SHA, eight execution results, six immutable indexes/child digests and all six
-verified channels after actual completion. Fork/private/non-main behavior is
-covered by offline policy tests, not claimed as an exercised hosted event.
+The implementation commit `47705f05923feeecd09c3447439878fd76505f21` was
+pushed cleanly to `main`. GitHub started [run 41195894882](https://github.com/DzNk/pyva-image/actions/runs/41195894882)
+automatically with event `push`, using that exact source SHA. The run completed
+successfully on 2026-10-31; checks and all six runtime jobs passed. No manual
+dispatch or local publication replaced the hosted release.
+
+Both baseline jobs executed amd64 **and** arm64. The four optimized jobs each
+executed amd64 after native glibc CPU/OS capability checks succeeded. Across all
+jobs, eight base smoke/native import/Java checks and eight JPype/POI XLSX checks
+passed before publication; all eight published selections then passed the
+pull-by-index-digest smoke checks. Runtime logs contain no Node.js 20 warning.
+
+A separate read-only registry check used `docker buildx imagetools inspect` on
+all six immutable tags and six channels. Every index and child digest matched
+both the locally built candidate and hosted release log. Default indexes have
+two Linux children (amd64/arm64); optimized indexes have one (amd64).
+
+Repository for every reference below: `docker.io/librebuilder098/pyva-runtime`.
+Every immutable tag appends the full shared suffix
+`-20261031T111223Z-g47705f05923feeecd09c3447439878fd76505f21` to its family.
+
+| Immutable family (append suffix above) | Verified channel | Index digest |
+| --- | --- | --- |
+| `3.13.18-java21-debian13` | `3.13-java21-debian13` | `sha256:028bf1f70e50c02b8a829c1a4d5240c4893ccdab7ab523b74f1cfe2cf181c796` |
+| `3.13.18-java21-debian13-amd64-v2` | `3.13-java21-debian13-amd64-v2` | `sha256:c80622f9e5a10bb98cabf1e0a09504498cd267e1fcb227870a0c134a0ec3120e` |
+| `3.13.18-java21-debian13-amd64-v3` | `3.13-java21-debian13-amd64-v3` | `sha256:f330495e9ae84699e6045acda9e7d738b90c4aba1932441377d4f82cc4deae2b` |
+| `3.14.10-java21-debian13` | `3.14-java21-debian13` | `sha256:4b298531d6aca70553bbcd8b82db4b0d2a90afd1a9f42530545a3bf867f00695` |
+| `3.14.10-java21-debian13-amd64-v2` | `3.14-java21-debian13-amd64-v2` | `sha256:b7fc9401a217d089efb7cc8cf944a236e0d547cb4820b340ab40a881f426a364` |
+| `3.14.10-java21-debian13-amd64-v3` | `3.14-java21-debian13-amd64-v3` | `sha256:f299806ecc0e45fc4d656906b3cf22ae677f1c023d519de47314314183c0220b` |
+
+Verified child digests and corresponding hosted jobs:
+
+- [runtime (3.13, baseline)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064277):
+  amd64 `sha256:eb4beab516d873492f043bc6a18961d30e0860fa0f02d9d133426f2c2d3df881`.
+  arm64 `sha256:e832b9998a6cba7437bee55ae29254dde011fd57f5ffd1235695526ed259ab59`.
+- [runtime (3.13, v2)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064267):
+  amd64 `sha256:8e2e5c38a2934cf4d2613d7a07c12990d44838d863184a701ce2159519a40e17`.
+- [runtime (3.13, v3)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064273):
+  amd64 `sha256:e464e43dc3a13a71edbf54b5e1edef862ec0e3cb9e03a3b547c20b5d6974345d`.
+- [runtime (3.14, baseline)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064294):
+  amd64 `sha256:b1569fad5392e7af69f46de6e3d54d8e6d524c7aaa89e96b7a4c123818b4d7df`.
+  arm64 `sha256:c88389e3789a78357fa7e910cdcccc6069d66af29e80de3bccc42fd956aea3e8`.
+- [runtime (3.14, v2)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064291):
+  amd64 `sha256:28dad7c4d4c3dc50208696dece38602ab4b6a482781cd242faf04f848cfb4b8b`.
+- [runtime (3.14, v3)](https://github.com/DzNk/pyva-image/actions/runs/41195894882/job/124522064256):
+  amd64 `sha256:496231e30e17c29a236bc15f7e7fd088d496eb2ba1e97afcf027fec3c0452771`.
+
+Registry check script/output: `/tmp/pyva-cpu-registry-check.py` and
+`/tmp/pyva-cpu-registry-results.json`. References and digests above preserve the
+evidence beyond those temporary files.
+
+The actual live refresh preparation was also rerun in a clean worktree at the
+implementation SHA: `python3 ci_update_python.py` completed successfully against
+the current Astral release, including tidy/deps and preparation regressions,
+reported the same prepared source, and created no empty commit. Log:
+`/tmp/pyva-cpu-preparation.log`. Fork/private/non-main behavior remains covered
+by offline policy tests, not claimed as an exercised hosted event. No CPU speed
+benchmark was run.
