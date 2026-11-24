@@ -12,62 +12,62 @@ python.override(minor_mapping = {
 python.single_version_platform_override(
     platform = "x86_64-unknown-linux-gnu",
     python_version = "3.13.18",
-    sha256 = "f2d2199eb25880e07863b391cf7124e7ffa1338b0d65600dfcec117c4223a7fb",
+    sha256 = "65d5c786e3cbd67533c346537ad0b8826ef158287b3cebaa34b30558cc330f59",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18+20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.13.18+20261123-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "aarch64-unknown-linux-gnu",
     python_version = "3.13.18",
-    sha256 = "55c00325f7c1fddf325dfc621aabdfbbac4dc54adda224af88ec411dc12db239",
+    sha256 = "9c9da4fc81fcdda1683ec8f97674bae46e3d246243ce8d781973817e13e2ec12",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18+20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.13.18+20261123-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "x86_64_v2-unknown-linux-gnu",
     python_version = "3.13.18",
-    sha256 = "95bc9134ad0482196fb3a9552e86608bb90d5de93e985a22db0c6303e605a267",
+    sha256 = "b353ac7d3f48b1889faaea007b1739c3aa03f8f9f1d0ebf5c100a96ee6c99b5f",
     strip_prefix = "python",
     target_compatible_with = ["@platforms//:incompatible"],
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18+20261110-x86_64_v2-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.13.18+20261123-x86_64_v2-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "x86_64_v3-unknown-linux-gnu",
     python_version = "3.13.18",
-    sha256 = "9bf128daf03caad2abb2cdcd5372c84cc15d787840ea84b50fbe6948cfff5830",
+    sha256 = "9453d77519d4f794e59192398bde96d5fcb76cc8ebfa24859f5d0de645358f25",
     strip_prefix = "python",
     target_compatible_with = ["@platforms//:incompatible"],
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18+20261110-x86_64_v3-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.13.18+20261123-x86_64_v3-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "x86_64-unknown-linux-gnu",
     python_version = "3.14.10",
-    sha256 = "c2ff2e97422f5d3896a16e0317fd212ba977bbf2688d93a6f7a03d817506bd30",
+    sha256 = "92102b15f5149d124b5b4b2f00f1ff2f827cf1a99dc1a22447ad52861bd80ace",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10+20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.14.10+20261123-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "aarch64-unknown-linux-gnu",
     python_version = "3.14.10",
-    sha256 = "38fd50f07170adc29d481913d1c30b17ecb538fbe290315fe1f83d84fdd5b694",
+    sha256 = "f1641401210144ca2eeb2774ee531f8bf903fd7f05d198b7feed62b40cbf4ba8",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10+20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.14.10+20261123-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "x86_64_v2-unknown-linux-gnu",
     python_version = "3.14.10",
-    sha256 = "d0e57d8feed3a9a33f46041b9062a6f0258bf8090978bc15b62db58e3ab0658b",
+    sha256 = "e473696d19cff305b81caef0828ffd72b1b242c7b7388ab96e78805bc91789ca",
     strip_prefix = "python",
     target_compatible_with = ["@platforms//:incompatible"],
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10+20261110-x86_64_v2-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.14.10+20261123-x86_64_v2-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.single_version_platform_override(
     platform = "x86_64_v3-unknown-linux-gnu",
     python_version = "3.14.10",
-    sha256 = "b30c7724e3dae1a41934ce241755414c7f2450854050c677f73a27273bbc051c",
+    sha256 = "f0a97e4ab6dd75d93177650735577c87a25d8c33f4f2a9d149a2a583c07e642f",
     strip_prefix = "python",
     target_compatible_with = ["@platforms//:incompatible"],
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10+20261110-x86_64_v3-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.14.10+20261123-x86_64_v3-unknown-linux-gnu-install_only_stripped.tar.gz"],
 )
 python.toolchain(python_version = "3.13")
 python.toolchain(python_version = "3.14")
