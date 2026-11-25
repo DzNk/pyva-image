@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import textwrap
 from types import SimpleNamespace
 
@@ -22,9 +23,9 @@ def shell(text, name):
     return textwrap.dedent(step(text, name).split("        run: |\n", 1)[1])
 
 
-def guard(expression, event, ref="refs/heads/main", private=False, **needs):
+def guard(expression, event, ref="refs/heads/main", private=False, repository="DzNk/pyva-image", **needs):
     github = SimpleNamespace(
-        event_name=event, ref=ref,
+        event_name=event, ref=ref, repository=repository,
         event=SimpleNamespace(repository=SimpleNamespace(private=private)),
     )
     expression = expression.replace("${{", "").replace("}}", "").strip()
@@ -51,6 +52,9 @@ def check(text):
     assert "github.event_name == 'pull_request' && github.sha || 'main'" in jobs["source"]
     assert "minor: ['3.13', '3.14']" in text and "fail-fast: false" in text
     assert "cpu: [baseline, v2, v3]" in text and "CPU: ${{ matrix.cpu }}" in text
+    assert "java: ['21']" in text and "JAVA_MAJOR: ${{ matrix.java }}" in text
+    for minor in ("3.13", "3.14"):
+        assert f"{{minor: '{minor}', cpu: baseline, java: '25'}}" in text
     assert "version: v29.8.2" in text and '"containerd-snapshotter":true' in text
     assert "platforms: arm64" in text and "cache-image: false" in text
     for action in re.findall(r"uses: (\S+)", text):
@@ -63,7 +67,7 @@ def check(text):
     assert "if: *publish" in step(text, "Docker Hub login")
     assert "password: ${{ secrets.DOCKERHUB_TOKEN }}" in step(text, "Docker Hub login")
     assert "if: *publish" in step(text, "Publish verified images and channel")
-    assert 'bash release.sh --channel "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY"' in text
+    assert 'bash release.sh --channel --java "$JAVA_MAJOR" "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY"' in text
     assert "if: ${{ github.event_name == 'pull_request' }}" in step(text, "Validate pull request images")
     assert "GH_TOKEN:" in step(text, "Save source before publishing")
     assert text.count("GH_TOKEN:") == 1 and "persist-credentials: true" not in text
@@ -76,6 +80,8 @@ def check(text):
                 assert guard(publish, event, ref, private) == trusted
                 assert guard(guards["refresh"], event, ref, private) == (trusted and event != "push")
                 assert guard(guards["source"], event, ref, private) == (not private and (event == "pull_request" or trusted))
+    assert not guard(publish, "push", repository="example/fork")
+    assert not guard(guards["refresh"], "schedule", repository="example/fork")
     for result in ("success", "skipped", "failure", "cancelled"):
         assert guard(guards["checks"], "push", source="success", refresh=result) == (result in ("success", "skipped"))
         assert guard(guards["checks"], "push", source=result, refresh="skipped") == (result == "success")
@@ -99,14 +105,19 @@ if __name__ == "__main__":
         assert (result.returncode == 0) == bool(destination and username)
     # Execute the actual publish shell for every matrix selection, without registry writes.
     executions = 0
-    for cpu in ("baseline", "v2", "v3"):
+    for java, cpu in (("21", "baseline"), ("21", "v2"), ("21", "v3"), ("25", "baseline")):
         for minor in ("3.13", "3.14"):
             command = shell(workflow, "Publish verified images and channel")
-            result = subprocess.run(["bash", "-e", "-c",
-                'bash() { printf "%s\\n" "$*"; };\n' + command], capture_output=True, text=True,
-                env={**os.environ, "CPU": cpu, "MINOR": minor, "DOCKERHUB_REPOSITORY": "docker.io/example/runtime"})
-            expected = "release.sh --channel " + ("" if cpu == "baseline" else f"--cpu {cpu} ") + f"{minor} docker.io/example/runtime"
-            assert result.returncode == 0 and result.stdout.strip() == expected, result
+            env = {**os.environ, "CPU": cpu, "MINOR": minor, "JAVA_MAJOR": java}
+            with tempfile.TemporaryDirectory() as directory:
+                summary = pathlib.Path(directory) / "summary"
+                result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c",
+                    'bash() { printf "Published %s\\n" "$*"; };\n' + command], capture_output=True, text=True,
+                    env={**env, "DOCKERHUB_REPOSITORY": "docker.io/example/runtime",
+                         "RUNNER_TEMP": directory, "GITHUB_STEP_SUMMARY": str(summary)})
+                expected = f"Published release.sh --channel --java {java} " + ("" if cpu == "baseline" else f"--cpu {cpu} ") + f"{minor} docker.io/example/runtime"
+                assert result.returncode == 0 and result.stdout.strip() == expected, result
+                assert summary.read_text().strip() == expected
             pr_command = shell(workflow, "Validate pull request images")
             stubs = '''
 bazel() { :; }
@@ -116,10 +127,10 @@ docker() { :; }
 git() { :; }
 '''
             result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", stubs + pr_command], capture_output=True, text=True,
-                env={**os.environ, "CPU": cpu, "MINOR": minor})
+                env=env)
             expected_arches = ("amd64", "arm64") if cpu == "baseline" else ("amd64",)
-            expected_calls = [f"smoke_test.sh {minor} --arch {arch}" + ("" if cpu == "baseline" else f" --cpu {cpu}") for arch in expected_arches]
+            expected_calls = [f"smoke_test.sh {minor} --java {java} --arch {arch}" + ("" if cpu == "baseline" else f" --cpu {cpu}") for arch in expected_arches]
             assert result.returncode == 0 and result.stdout.splitlines() == expected_calls, result
             executions += len(expected_calls)
-    assert executions == 8
+    assert executions == 12
     print("Workflow policy passed: public/main guards, isolated credentials, frozen SHA and serialized publishers")

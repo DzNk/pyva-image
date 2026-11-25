@@ -37,7 +37,7 @@ jobs:
 
   refresh:
     needs: source
-    if: ${{ github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) }}
+    if: ${{ github.repository == 'DzNk/pyva-image' && github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -55,7 +55,9 @@ jobs:
           disk-cache: false
           repository-cache: false
           cache-save: false
-      - name: Prepare Python update
+      - name: Prepare runtime update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 ci_update_python.py
       - name: Save source before publishing
         id: push
@@ -104,6 +106,7 @@ jobs:
           bash test_repository.sh
           python3 test_python_manifest.py
           python3 test_python_manifest.py --bazel
+          python3 test_java_runtime.py
           python3 test_image_manifest.py
           bash test_release.sh
           python3 test_ci_workflow.py
@@ -122,9 +125,14 @@ jobs:
       matrix:
         minor: ['3.13', '3.14']
         cpu: [baseline, v2, v3]
+        java: ['21']
+        include:
+          - {minor: '3.13', cpu: baseline, java: '25'}
+          - {minor: '3.14', cpu: baseline, java: '25'}
     env:
       MINOR: ${{ matrix.minor }}
       CPU: ${{ matrix.cpu }}
+      JAVA_MAJOR: ${{ matrix.java }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -157,6 +165,11 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           target="pyva_runtime_${MINOR//./_}"
+          local_tag="$MINOR"
+          if [[ "$JAVA_MAJOR" == 25 ]]; then
+            target+="_java25"
+            local_tag+="-java25"
+          fi
           arches=(amd64 arm64)
           cpu_args=()
           if [[ "$CPU" != baseline ]]; then
@@ -165,20 +178,20 @@ jobs:
             cpu_args=(--cpu "$CPU")
           fi
           bazel build "//:$target"
-          python3 image_manifest.py local "bazel-bin/$target" "$MINOR" "${cpu_args[@]}"
+          python3 image_manifest.py local "bazel-bin/$target" "$MINOR" --java "$JAVA_MAJOR" "${cpu_args[@]}"
           for arch in "${arches[@]}"; do
             selection="$arch"
             if [[ "$CPU" != baseline ]]; then selection+="-$CPU"; fi
-            bash smoke_test.sh "$MINOR" --arch "$arch" "${cpu_args[@]}"
+            bash smoke_test.sh "$MINOR" --java "$JAVA_MAJOR" --arch "$arch" "${cpu_args[@]}"
             docker build --platform "linux/$arch" --file Dockerfile.poi-smoke \
               --build-arg "PYTHON_VERSION=$MINOR" \
-              --build-arg "RUNTIME_IMAGE=pyva-runtime:$MINOR-$selection" \
-              --tag "pyva-poi-smoke:$MINOR-$selection" .
-            docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$MINOR-$selection"
+              --build-arg "RUNTIME_IMAGE=pyva-runtime:$local_tag-$selection" \
+              --tag "pyva-poi-smoke:$local_tag-$selection" .
+            docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$local_tag-$selection"
           done
           test -z "$(git status --porcelain --untracked-files=all)"
       - name: Check publication configuration
-        if: &publish ${{ github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name) }}
+        if: &publish ${{ github.repository == 'DzNk/pyva-image' && github.event.repository.private == false && github.ref == 'refs/heads/main' && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name) }}
         env:
           DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
@@ -198,4 +211,5 @@ jobs:
         run: |
           cpu_args=()
           if [[ "$CPU" != baseline ]]; then cpu_args=(--cpu "$CPU"); fi
-          bash release.sh --channel "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY"
+          bash release.sh --channel --java "$JAVA_MAJOR" "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY" | tee "$RUNNER_TEMP/release.log"
+          grep '^Published ' "$RUNNER_TEMP/release.log" >> "$GITHUB_STEP_SUMMARY"

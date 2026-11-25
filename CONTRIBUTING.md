@@ -31,14 +31,24 @@ The stripped inputs omit native debug symbols; Python tracebacks still work.
 There is no local strip step. Restore the updater and fragment together to roll
 back the policy, and publish under a new commit-derived tag.
 
+Refresh Java pins with `python3 update_java_manifest.py`. The version, URLs and
+SHA-256 checksums for each Temurin major and architecture are in
+`java_runtime.json`. Updating requires both Linux HotSpot JRE archives for each
+selected release. Set `GITHUB_TOKEN` for GitHub API authentication if anonymous
+requests reach the rate limit. Bazel verifies the hashes and repackages each archive into
+its own JVM layer. The Debian snapshot supplies the shared system libraries
+listed in `MODULE.bazel`. Run `python3 test_java_runtime.py` for offline checks.
+
 ## Build and execute
 
-There are eight explicit image/load targets and six native OCI index targets.
-The index targets `//:pyva_runtime_3_13` and `//:pyva_runtime_3_14` each contain
-both platforms. Debian Java closures and `JAVA_HOME` use the selected architecture.
+The index targets `//:pyva_runtime_3_13` and `//:pyva_runtime_3_14` contain
+both platforms with Java 21. Append `_java25` to either index target for Java 25.
+Each Java major uses a platform-specific JRE and shares its Python layer with
+the other major.
 
 ```sh
 bazel build //:pyva_runtime_3_13 //:pyva_runtime_3_14
+bazel build //:pyva_runtime_3_13_java25 //:pyva_runtime_3_14_java25
 for minor in 3_13 3_14; do
   for arch in amd64 arm64; do
     target="pyva_runtime_${minor}_${arch}_load"
@@ -53,6 +63,11 @@ and `:3.14-arm64`. Legacy `bazel run //:pyva_runtime_3_13_load` and
 `//:pyva_runtime_3_14_load` still load amd64, with `:3.13`/`:3.14` and exact
 `X.Y.Z-java21-debian13` local aliases. Their tarball paths remain available.
 ARM loaders never replace these aliases.
+
+Add `_java25` before the architecture in a loader target, for example
+`//:pyva_runtime_3_14_java25_arm64_load`, to load
+`pyva-runtime:3.14-java25-arm64`. Run `bash smoke_test.sh 3.14 --java 25 --arch arm64`
+to load and verify that variant.
 
 ```sh
 for minor in 3.13 3.14; do
@@ -146,25 +161,26 @@ before changing the consumer's image digest.
 
 Use a matching 3.14 builder/runtime for Python 3.14; select the matching platform
 and local tag for ARM64. Defaults: `/usr/bin/python3`, `/app`, UID/GID 65532.
-`JAVA_HOME=/usr/lib/jvm/java-21-openjdk-<arch>` and its `lib/server` is in
+`JAVA_HOME=/usr/lib/jvm/java-<major>-openjdk-<arch>` and its `lib/server` is in
 `LD_LIBRARY_PATH`. `/etc/certs` starts empty, with `SSL_CERT_DIR=/etc/certs`.
 Copy your public PEM files there and configure Wassima or your application to
-read them. The image does not generate/convert a Java truststore; configure
-Java truststores separately when required. Never copy private keys into images.
+read them. Java uses the truststore supplied by Temurin. Configure a Java
+truststore separately when required and keep private keys outside images.
 
 ## Release
 
 Credentials stay in Docker's external credential store. Run from a clean source
 commit, including eligible untracked files. The immutable tag is
-`X.Y.Z-java21-debian13-YYYYMMDDTHHMMSSZ-g<full-commit-SHA>`; the timestamp is the
+`X.Y.Z-java<J>-debian13-YYYYMMDDTHHMMSSZ-g<full-commit-SHA>`. The timestamp is the
 Git **committer** time converted to UTC. Rebuild time and timezone do not affect
-the tag or image bytes. The image version label remains `X.Y.Z-java21-debian13`.
+the tag or image bytes. The image version label is `X.Y.Z-java<J>-debian13`.
 
 ```sh
 docker login
 bash release.sh 3.13 docker.io/<namespace>/pyva-runtime
 bash release.sh 3.14 index.docker.io/<namespace>/pyva-runtime
 bash release.sh --channel 3.13 docker.io/<namespace>/pyva-runtime
+bash release.sh --channel --java 25 3.14 docker.io/<namespace>/pyva-runtime
 ```
 
 The two Docker Hub host aliases normalize to `index.docker.io`. Supply exactly
@@ -172,7 +188,9 @@ two lowercase path components, without schemes, tags, digests or whitespace.
 Other registries are rejected before any build/upload. Components begin/end in
 letters/digits; separators are one dot, one/two underscores or hyphens.
 
-Both base and POI runs must pass and match the candidate manifests. Local OCI
+Both base and POI runs must pass and match the candidate manifests. The JVM
+must match the pin and meet `21.0.13.1` or `25.0.5.1` for its major.
+Local OCI
 inspection checks every layer blob for bundled Python installation tools; hiding
 them with a later whiteout is rejected. Before upload, a confirmed absent
 immutable tag permits publishing; identical index content
@@ -180,13 +198,13 @@ permits a verified retry. Different content, authorization, transport and unknow
 errors stop the release without overwriting. After upload, the index and both
 child digests must match, and both explicit platform pulls/runs must pass.
 
-Optional `--channel` updates only `3.13-java21-debian13` or `3.14-java21-debian13`,
+Optional `--channel` updates only the selected `X.Y-java<J>-debian13` channel,
 after all immutable checks, by copying the verified registry index **by digest**
 and checking equality. Default releases leave channels alone; no global `latest`.
 The preflight assumes one publisher per repository/tag. Serialize concurrent
 publishers; Docker Hub offers no compare-and-set tag update.
 
-For an optimized release, explicitly select the CPU level:
+For an optimized Java 21 release, explicitly select the CPU level:
 
 ```sh
 bash release.sh --channel --cpu v2 3.13 docker.io/<namespace>/pyva-runtime
@@ -223,11 +241,11 @@ requires a new reviewed source commit and therefore a new dated release tag.
 ## GitHub Actions automation
 
 The `Python runtime` workflow in `.github/workflows/ci.yml` checks pull requests
-to `main`, publishes pushes to `main`, and checks Astral daily at **04:23 UTC**.
+to `main`, publishes pushes to `main`, and checks Astral and Temurin daily at **04:23 UTC**.
 Use **Actions → Python runtime → Run workflow → main** to start it immediately.
 Other branches/tags cannot refresh inputs, authenticate to Docker Hub or publish.
-PRs, including forks, run regressions and all eight variants (both Python minors,
-each with baseline amd64/arm64 and explicit amd64-v2/v3)
+PRs, including forks, run regressions and all twelve variants (both Python minors
+and Java majors on baseline amd64/arm64, plus the four Java 21 CPU variants)
 without repository writes or publishing credentials.
 
 One-time setup for a public GitHub repository and public Docker Hub repository:
@@ -259,33 +277,35 @@ artifacts for Python 3.13/3.14, with all four architecture/CPU selections requir
 artifact release at the same Python patch also counts as an update. A missing
 artifact, malformed checksum or Python patch downgrade fails without recording
 partial inputs. A CPython announcement alone is insufficient: the corresponding
-complete Astral release must be available. Java, Debian, Bazel, rules and the
-supported minor list are not automatically upgraded.
+complete Astral release must be available. The same preparation refreshes the
+stable Temurin 21 and 25 tarballs, requiring both architectures and the JVM
+security minimum for each. Debian, Bazel, the rules and the supported version
+lines stay pinned.
 
-Preparation commits only `python_runtimes.MODULE.bazel` and its required
-`MODULE.bazel.lock`, after checks, directly to `main` without a PR or manual
-merge. Unchanged inputs create no empty commit. A normal push rejected by branch
+Preparation commits only changed runtime pins and their required
+`MODULE.bazel.lock` after checks, directly to `main`. Unchanged inputs create
+no empty commit. A normal push rejected by branch
 rules or a concurrent update stops the run; it never force-pushes. A push made
 with `GITHUB_TOKEN` does not trigger another push workflow, so the **same run**
 passes its saved commit SHA to subsequent checks and publication jobs. All
 release jobs use that exact clean checkout. Main push events use committed
-inputs without refreshing Python. Trusted runs select current `main` after
+inputs without refreshing upstream versions. Trusted runs select current `main` after
 acquiring the shared publication group, so a queued older event does not select
 an obsolete event SHA.
 
-After regressions, the runtime matrix is two minors × `baseline`, `v2`, `v3`:
-six jobs build and verify eight images and publish six indexes. Every main push
-starts this hosted build/publication automatically, including the first CPU
-variant implementation push; manual dispatch is optional recovery, not a
-prerequisite. Each job calls `release.sh --channel` with its explicit CPU flag
-when applicable. Baseline jobs execute amd64 and arm64, optimized jobs execute
+After regressions, four baseline jobs cover both Python minors and Java majors.
+Four more jobs cover the existing Java 21 CPU variants. Together they build and
+verify twelve images and publish eight indexes. Every main push starts this
+hosted build/publication automatically. Each job calls `release.sh --channel`
+with its Java major and CPU flag when applicable. The summary records the
+verified immutable tag and index digest. Baseline jobs execute amd64 and arm64, optimized jobs execute
 one compatible native amd64 image with recorded CPU/OS capabilities. Missing
 capabilities fail the job rather than skipping it. All retain base/JPype/POI and
-remote digest/pull checks. Channels are the existing minor channels plus
-`X.Y-java21-debian13-amd64-v2` and `-v3`; no global `latest` is created. One
+remote digest/pull checks. Channels are `X.Y-java<J>-debian13` and the existing
+`X.Y-java21-debian13-amd64-v2` and `-v3`. One
 selection can succeed while another fails: the overall run then fails, and the
-failed selection's channel is not advanced. Publication is not a six-selection
-transaction.
+failed selection's channel is not advanced. Rerunning the same commit verifies
+matching immutable indexes and completes outstanding selections.
 
 Every successful scheduled/manual preparation proceeds to publication even
 without new inputs. This intentionally repeats builds/checks daily, reuses

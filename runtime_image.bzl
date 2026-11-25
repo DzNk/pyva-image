@@ -38,34 +38,55 @@ _runtime_files = rule(
 )
 
 def runtime_layers(arch):
-    """Package the explicit Debian closure and Java path for one architecture."""
+    """Package the Debian shared libraries and the selected Temurin archive."""
     flatten(
-        name = "java_flat_" + arch,
-        tars = ["@debian13_openjdk21//openjdk-21-jre-headless/" + arch],
+        name = "runtime_libraries_flat_" + arch,
+        tars = ["@debian13_runtime_libraries//{}/{}".format(package, arch) for package in [
+            "libc6",
+            "libjpeg62-turbo",
+            "liblcms2-2",
+            "libnss3",
+            "libpcsclite1",
+            "libssl3t64",
+            "libstdc++6",
+            "libtinfo6",
+            "zlib1g",
+        ]],
         deduplicate = True,
     )
     # Debian 13 is merged-/usr.
     deb_postfix(
-        name = "java_layer_" + arch,
+        name = "runtime_libraries_" + arch,
         mergedusr = True,
-        outs = ["java_layer_" + arch + ".tar.gz"],
-        srcs = [":java_flat_" + arch],
+        outs = ["runtime_libraries_" + arch + ".tar.gz"],
+        srcs = [":runtime_libraries_flat_" + arch],
+    )
+    java_layer(arch, "21")
+    java_layer(arch, "25")
+
+def java_layer(arch, java):
+    suffix = java + "_" + arch
+    java_home = "usr/lib/jvm/java-{}-openjdk-{}".format(java, arch)
+    native.genrule(
+        name = "java_layer_" + suffix,
+        srcs = ["@temurin_" + suffix + "//:jre.tar.gz"],
+        outs = ["java_layer_" + suffix + ".tar.gz"],
+        cmd = '$(location :package_temurin) "$<" "$@" ' + java_home,
+        tools = [":package_temurin"],
     )
     pkg_mklink(
-        name = "java_" + arch,
+        name = "java_" + suffix,
         link_name = "usr/bin/java",
-        target = "../lib/jvm/java-21-openjdk-" + arch + "/bin/java",
+        target = "../" + java_home.removeprefix("usr/") + "/bin/java",
     )
     pkg_tar(
-        name = "metadata_layer_" + arch,
-        srcs = [":app_dir", ":certs_dir", ":java_" + arch],
+        name = "metadata_layer_" + suffix,
+        srcs = [":app_dir", ":certs_dir", ":java_" + suffix],
     )
 
-def runtime_image(python_version, arch, cpu_variant = ""):
-    """Define a platform image and its separately tagged Docker loader."""
+def python_layer(python_version, arch, cpu_variant = ""):
+    """Package CPython once for the platform, shared by both Java majors."""
     suffix = python_version.replace(".", "_")
-    if cpu_variant not in ["", "v2", "v3"] or (cpu_variant and arch != "amd64"):
-        fail("CPU variants require amd64 and v2 or v3")
     selection = arch + ("_" + cpu_variant if cpu_variant else "")
     name = "pyva_runtime_" + suffix + "_" + selection
     repo = "@cpython_" + suffix + "_" + selection
@@ -114,11 +135,22 @@ def runtime_image(python_version, arch, cpu_variant = ""):
             for link in links
         ],
     )
+
+def runtime_image(python_version, arch, cpu_variant = "", java = "21"):
+    """Define a platform image and its separately tagged Docker loader."""
+    if cpu_variant and (cpu_variant not in ["v2", "v3"] or arch != "amd64" or java != "21"):
+        fail("CPU variants require amd64, Java 21, and v2 or v3")
+    selection = arch + ("_" + cpu_variant if cpu_variant else "")
+    root = "pyva_runtime_" + python_version.replace(".", "_")
+    java_suffix = "" if java == "21" else "_java" + java
+    local_tag = python_version + java_suffix.replace("_", "-")
+    name = root + java_suffix + "_" + selection
+    java_home = "/usr/lib/jvm/java-{}-openjdk-{}".format(java, arch)
     version = MINOR_MAPPING[python_version]
-    tag = version + "-java21-debian13"
+    tag = version + "-java" + java + "-debian13"
     metadata = {
         "org.opencontainers.image.title": "pyva-runtime",
-        "org.opencontainers.image.description": "Distroless Debian 13 runtime with CPython " + version + " and OpenJDK 21 for JPype.",
+        "org.opencontainers.image.description": "Distroless Debian 13 runtime with CPython " + version + " and Eclipse Temurin " + java + " for JPype.",
         "org.opencontainers.image.version": tag,
         "org.opencontainers.image.base.name": "gcr.io/distroless/static-debian13",
     }
@@ -131,29 +163,35 @@ def runtime_image(python_version, arch, cpu_variant = ""):
         labels = metadata,
         entrypoint = ["/usr/bin/python3"],
         env = {
-            "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-" + arch,
-            "LD_LIBRARY_PATH": "/usr/lib/jvm/java-21-openjdk-" + arch + "/lib/server",
+            "JAVA_HOME": java_home,
+            "LD_LIBRARY_PATH": java_home + "/lib/server",
             "PATH": "/usr/bin:/bin",
             "PYTHONHOME": "/usr",
             "SSL_CERT_DIR": "/etc/certs",
         },
-        tars = [":java_layer_" + arch, ":" + name + "_python_layer", ":metadata_layer_" + arch],
+        tars = [
+            ":runtime_libraries_" + arch,
+            ":java_layer_" + java + "_" + arch,
+            ":" + root + "_" + selection + "_python_layer",
+            ":metadata_layer_" + java + "_" + arch,
+        ],
         user = "65532:65532",
         workdir = "/app",
     )
     oci_load(
         name = name + "_load",
         image = ":" + name,
-        repo_tags = ["pyva-runtime:" + python_version + "-" + selection.replace("_", "-")] + (
-            ["pyva-runtime:" + python_version, "pyva-runtime:" + tag] if arch == "amd64" and not cpu_variant else []
+        repo_tags = ["pyva-runtime:" + local_tag + "-" + selection.replace("_", "-")] + (
+            ["pyva-runtime:" + local_tag, "pyva-runtime:" + tag] if arch == "amd64" and not cpu_variant else []
         ),
     )
 
-def runtime_index(python_version, cpu_variant = ""):
+def runtime_index(python_version, cpu_variant = "", java = "21"):
     """Publish the default pair or one explicit CPU image; release.sh sets tags."""
     if cpu_variant not in ["", "v2", "v3"]:
         fail("CPU variant must be v2 or v3")
-    root = "pyva_runtime_" + python_version.replace(".", "_")
+    java_variant = "" if java == "21" else "java" + java
+    root = "pyva_runtime_" + python_version.replace(".", "_") + ("_" + java_variant if java_variant else "")
     name = root + ("_amd64_" + cpu_variant + "_index" if cpu_variant else "")
     oci_image_index(
         name = name,
@@ -164,5 +202,8 @@ def runtime_index(python_version, cpu_variant = ""):
         oci_load(
             name = name + "_load",
             image = ":" + name + "_amd64",
-            repo_tags = ["pyva-runtime:" + python_version, "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java21-debian13"],
+            repo_tags = [
+                "pyva-runtime:" + python_version + ("-" + java_variant if java_variant else ""),
+                "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java" + java + "-debian13",
+            ],
         )

@@ -24,6 +24,32 @@ use_repo(tar_toolchains, "bsd_tar_toolchains")
 
 include("//:python_runtimes.MODULE.bazel")
 
+temurin = use_repo_rule("//:temurin.bzl", "temurin_archive")
+
+temurin(
+    name = "temurin_21_amd64",
+    arch = "amd64",
+    java = "21",
+)
+
+temurin(
+    name = "temurin_21_arm64",
+    arch = "arm64",
+    java = "21",
+)
+
+temurin(
+    name = "temurin_25_amd64",
+    arch = "amd64",
+    java = "25",
+)
+
+temurin(
+    name = "temurin_25_arm64",
+    arch = "arm64",
+    java = "25",
+)
+
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "distroless_static_debian13",
@@ -48,8 +74,18 @@ apt.sources_list(
     uris = ["https://snapshot.debian.org/archive/debian/20250901T000000Z"],
 )
 apt.install(
-    dependency_set = "debian13_openjdk21",
-    packages = ["openjdk-21-jre-headless"],
+    dependency_set = "debian13_runtime_libraries",
+    packages = [
+        "libc6",
+        "libjpeg62-turbo",
+        "liblcms2-2",
+        "libnss3",
+        "libpcsclite1",
+        "libssl3t64",
+        "libstdc++6",
+        "libtinfo6",
+        "zlib1g",
+    ],
     suites = ["trixie"],
 )
-use_repo(apt, "debian13_openjdk21")
+use_repo(apt, "debian13_runtime_libraries")

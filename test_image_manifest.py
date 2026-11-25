@@ -29,7 +29,7 @@ def rejected(operation):
         raise AssertionError("invalid candidate accepted")
 
 
-def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None):
+def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None, java="21"):
     blobs = root / "blobs/sha256"
     blobs.mkdir(exist_ok=True, parents=True)
 
@@ -42,7 +42,7 @@ def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None
     children = []
     for arch in (arches if arches is not None else (("amd64",) if cpu else ("amd64", "arm64"))):
         descriptors = [dict(save(data), mediaType="application/vnd.oci.image.layer.v1.tar" + ("+gzip" if data.startswith(b"\x1f\x8b") else "")) for data in layers]
-        metadata = {"org.opencontainers.image.version": minor + ".99-java21-debian13"}
+        metadata = {"org.opencontainers.image.version": minor + f".99-java{java}-debian13"}
         if cpu:
             metadata["io.pyva.cpu.variant"] = cpu if label is None else label
         config = save({"os": "linux", "architecture": arch, "config": {
@@ -84,6 +84,9 @@ with tempfile.TemporaryDirectory() as directory:
                 "setuptools-70.3.0.dist-info/METADATA", "pkg_resources/__init__.py",
                 "_distutils_hack/__init__.py", "distutils-precedence.pth",
             )]
+        layout(root, minor, [good], java="25")
+        assert local(root, minor, java="25")[0] == minor + ".99-java25-debian13"
+        rejected(lambda: local(root, minor))
         for name in forbidden:
             assert packaging_path("./" + name), name
             for data in (tar([name]), gzip.compress(tar([name]), mtime=0)):

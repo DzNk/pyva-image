@@ -12,6 +12,12 @@ for module in ("pip", "ensurepip", "setuptools", "pkg_resources"):
 output = pathlib.Path("/tmp/poi-smoke.xlsx")
 jpype.startJVM(jpype.getDefaultJVMPath(), "-Djava.class.path=/app/poi/*")
 
+TrustManagerFactory = jpype.JClass("javax.net.ssl.TrustManagerFactory")
+KeyStore = jpype.JClass("java.security.KeyStore")
+trust_managers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+trust_managers.init(jpype.JObject(None, KeyStore))
+assert any(len(manager.getAcceptedIssuers()) for manager in trust_managers.getTrustManagers())
+
 Workbook = jpype.JClass("org.apache.poi.xssf.usermodel.XSSFWorkbook")
 FileOutputStream = jpype.JClass("java.io.FileOutputStream")
 

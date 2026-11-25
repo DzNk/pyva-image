@@ -1,6 +1,6 @@
 # pyva-runtime
 
-**Python · Java 21 · JPype · Apache POI · Distroless**
+**Python · Java 21 / 25 · JPype · Apache POI · Distroless**
 
 [Docker Hub: librebuilder098/pyva-runtime](https://hub.docker.com/r/librebuilder098/pyva-runtime)
 
@@ -9,8 +9,9 @@
 Образ для приложений, которым нужно вызывать Java-код из Python через JPype:
 например, работать с документами через Apache POI.
 
-Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
-платформы **linux/amd64** и **linux/arm64**.
+Python **3.13 / 3.14** с Eclipse Temurin **21 / 25** на Debian **13**.
+Все четыре пары доступны для **linux/amd64** и **linux/arm64**. Выберите тег
+`3.13-java25-debian13` или `3.14-java25-debian13` для Java 25.
 Для совместимых x86-64 CPU доступны отдельные теги
 `3.13-java21-debian13-amd64-v2` / `-v3` (также для 3.14).
 Выбор явный; общий образ остаётся baseline amd64 + arm64, ускорение не гарантируется.
@@ -28,8 +29,9 @@ PEM-сертификаты: `/etc/certs`, по умолчанию `SSL_CERT_DIR=
 A runtime for calling Java code from Python through JPype:
 for example, processing documents with Apache POI.
 
-Python **3.13 / 3.14**, OpenJDK **21**, Debian **13**;
-platforms **linux/amd64** and **linux/arm64**.
+Python **3.13 / 3.14** with Eclipse Temurin **21 / 25** on Debian **13**.
+All four pairs support **linux/amd64** and **linux/arm64**. Select
+`3.13-java25-debian13` or `3.14-java25-debian13` for Java 25.
 Compatible x86-64 CPUs can use explicit tags
 `3.13-java21-debian13-amd64-v2` / `-v3` (also for 3.14).
 The shared image retains baseline amd64 + arm64; a speedup is not guaranteed.

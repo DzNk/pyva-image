@@ -40,6 +40,8 @@ def scenario(case):
             real_run("git", "config", "user.email", "fixture@example.invalid")
             fragment = repo / "python_runtimes.MODULE.bazel"
             fragment.write_text(updater.render(updater.manifest("20260929", records("20260929", 9))))
+            java_manifest = repo / "java_runtime.json"
+            java_manifest.write_text("previous Java pins\n")
             (repo / "MODULE.bazel.lock").write_text("old lock\n")
             real_run("git", "add", ".")
             real_run("git", "commit", "--quiet", "-m", "fixture")
@@ -47,11 +49,11 @@ def scenario(case):
             real_run("git", "push", "--quiet", "origin", "main")
             before = real_run("git", "rev-parse", "HEAD").strip()
             candidate_tag = "20260930" if case == "astral-rebuild" else "20260929"
-            candidate_patch = 9 if case in ("no-change", "astral-rebuild") else 10
+            candidate_patch = 9 if case in ("no-change", "astral-rebuild", "java-only") else 10
             if case == "downgrade":
                 candidate_patch = 8
             data = records(candidate_tag, candidate_patch)
-            if case.startswith("missing-"):
+            if case.startswith("missing-") and case != "missing-java":
                 target = updater.PLATFORMS[case.removeprefix("missing-")]
                 data = "\n".join(line for line in data.splitlines() if f"-{target}-" not in line)
             if case == "bad-checksum":
@@ -65,7 +67,7 @@ def scenario(case):
 
             def run(*args):
                 if args[0] == "bazel":
-                    if case != "no-change":
+                    if case not in ("no-change", "java-only"):
                         (repo / "MODULE.bazel.lock").write_text("candidate lock\n")
                     if case == "unexpected-file":
                         (repo / "surprise.txt").write_text("not an input")
@@ -76,9 +78,15 @@ def scenario(case):
                     return ""
                 return real_run(*args)
 
+            def refresh_java():
+                if case == "java-only":
+                    java_manifest.write_text("updated Java pins\n")
+                if case == "missing-java":
+                    raise ValueError("incomplete Java release")
+
             failed = False
             try:
-                with patch.object(updater, "OUTPUT", fragment), patch.object(updater, "download", download), patch.object(ci, "run", run), contextlib.redirect_stdout(io.StringIO()):
+                with patch.object(updater, "OUTPUT", fragment), patch.object(updater, "download", download), patch.object(ci.java_updater, "refresh", refresh_java), patch.object(ci, "run", run), contextlib.redirect_stdout(io.StringIO()):
                     ci.main()
             except (ValueError, subprocess.CalledProcessError):
                 failed = True
@@ -90,6 +98,8 @@ def scenario(case):
                 return
             after = real_run("git", "rev-parse", "HEAD").strip()
             assert (after == before) == (case == "no-change")
+            if case == "java-only":
+                assert real_run("git", "diff", "--name-only", before, after).strip() == "java_runtime.json"
             assert not real_run("git", "status", "--porcelain", "--untracked-files=all")
             assert "extraheader" not in (repo / ".git/config").read_text()
             if case == "rejected-push":
@@ -113,7 +123,7 @@ def scenario(case):
                 assert real_run("git", "ls-remote", "origin", "refs/heads/main").split()[0] == after
                 if case == "update":
                     # A later schedule must retry publication even with no new source diff.
-                    with patch.object(updater, "OUTPUT", fragment), patch.object(updater, "download", download), patch.object(ci, "run", run), contextlib.redirect_stdout(io.StringIO()):
+                    with patch.object(updater, "OUTPUT", fragment), patch.object(updater, "download", download), patch.object(ci.java_updater, "refresh"), patch.object(ci, "run", run), contextlib.redirect_stdout(io.StringIO()):
                         ci.main()
                     assert real_run("git", "rev-parse", "HEAD").strip() == after
             assert "fixture-token" not in result.stdout + result.stderr + (repo / ".git/config").read_text()
@@ -121,6 +131,6 @@ def scenario(case):
             os.chdir(original_cwd)
 
 
-for case in ("update", "no-change", "astral-rebuild", "downgrade", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main", *("missing-" + arch for arch in updater.PLATFORMS)):
+for case in ("update", "java-only", "no-change", "astral-rebuild", "downgrade", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main", "missing-java", *("missing-" + arch for arch in updater.PLATFORMS)):
     scenario(case)
 print("CI update passed: numeric patches, atomic inputs, real Git push, no-change/retry and rejected/concurrent writes")

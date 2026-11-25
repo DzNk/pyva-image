@@ -66,7 +66,7 @@ def children(index, cpu=""):
     return result
 
 
-def local(root, minor, cpu=""):
+def local(root, minor, cpu="", java="21"):
     def blob(descriptor):
         expected = digest(descriptor["digest"])
         data = (root / "blobs/sha256" / expected.split(":")[1]).read_bytes()
@@ -92,7 +92,7 @@ def local(root, minor, cpu=""):
         if (config["os"], config["architecture"]) != ("linux", arch):
             raise ValueError("config platform differs from index")
         version = config["config"]["Labels"]["org.opencontainers.image.version"]
-        if not re.fullmatch(re.escape(minor) + r"\.[0-9]+-java21-debian13", version):
+        if not re.fullmatch(re.escape(minor) + rf"\.[0-9]+-java{re.escape(java)}-debian13", version):
             raise ValueError("unexpected runtime identity")
         versions.add(version)
         configs[arch] = digest(manifest["config"]["digest"])
@@ -106,12 +106,13 @@ def local(root, minor, cpu=""):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpu", choices=("v2", "v3"), default="")
+    parser.add_argument("--java", choices=("21", "25"), default="21")
     parser.add_argument("mode", choices=("local", "remote", "loaded"))
     parser.add_argument("args", nargs="+")
     params = parser.parse_intermixed_args()
     if params.mode == "local":
         root, minor = params.args
-        print(" ".join(local(Path(root), minor, params.cpu)))
+        print(" ".join(local(Path(root), minor, params.cpu, params.java)))
     elif params.mode == "remote":
         descriptor = json.load(sys.stdin)
         expected = [digest(d) for d in params.args]

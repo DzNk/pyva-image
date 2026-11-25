@@ -33,6 +33,8 @@ bash() {
   [[ "$1" == smoke_test.sh && "$2" == "$test_minor" && "$3" == --arch ]] || return 98
   local arch="$4" phase=base
   shift 4
+  [[ "${PYVA_STRICT_JAVA:-}" == 1 && "${1:-}" == --java && "${2:-}" == "$test_java" ]] || return 98
+  shift 2
   if [[ -n "$test_cpu" ]]; then
     [[ "${1:-}" == --cpu && "${2:-}" == "$test_cpu" ]] || return 98
     shift 2
@@ -50,7 +52,7 @@ docker() {
       local image="${@: -1}" arch="${4#linux/}" fault=none
       [[ "$5" == --format && "$6" == '{{json .}}' && ( "$arch" == amd64 || "$arch" == arm64 ) ]] || return 98
       if [[ "$image" == "$test_repository@$test_index" ]]; then [[ "$(cat "$test_root/pulled")" == "$arch" ]] || return 98;
-      else [[ "$image" == "pyva-runtime:$test_minor-$arch${test_cpu:+-$test_cpu}" ]] || return 98; fi
+      else [[ "$image" == "pyva-runtime:$test_minor$test_java_variant-$arch${test_cpu:+-$test_cpu}" ]] || return 98; fi
       if [[ "$test_failure" == load-digest && "$image" == pyva-runtime:* || "$test_failure" == pull-digest && "$image" == "$test_repository@$test_index" ]]; then fault=layers; fi
       command python3 - "$test_root/loaded-$arch.json" "$fault" <<'PYJSON'
 import json, sys
@@ -95,25 +97,28 @@ if sys.argv[2]=='platform': m['manifests'][-1]['platform']['architecture']='amd6
 print(json.dumps(m))
 PY
       ;;
-    "buildx imagetools create --tag $test_repository:${test_minor}-java21-debian13${test_cpu:+-amd64-$test_cpu} $test_repository@$test_index")
+    "buildx imagetools create --tag $test_repository:${test_minor}-java${test_java}-debian13${test_cpu:+-amd64-$test_cpu} $test_repository@$test_index")
       [[ "$test_failure" != channel-copy ]] || return 42
       local final_arch=arm64
       [[ -z "$test_cpu" ]] || final_arch=amd64
-      command grep -q "bash smoke_test.sh $test_minor --arch $final_arch${test_cpu:+ --cpu $test_cpu} $test_repository@$test_index" "$test_log" || return 98 ;;
+      command grep -q "bash smoke_test.sh $test_minor --arch $final_arch --java $test_java${test_cpu:+ --cpu $test_cpu} $test_repository@$test_index" "$test_log" || return 98 ;;
     *) echo "Unexpected Docker command: $*" >&2; return 98 ;;
   esac
 }
 export -f operation git bazel bash docker
 export test_root test_log test_minor test_repository test_commit test_tag test_index test_amd64_config test_arm64_config test_existing test_failure
-export test_cpu test_target
+export test_cpu test_target test_java test_java_variant
 
 test_repository=index.docker.io/example/pyva-runtime
 test_commit=c9019d10b9bde89ed69d4e9e30a551e8951cb6d7
 test_existing=false
 test_failure=none
+test_java=21
 prepare() {
-  test_target="pyva_runtime_${test_minor//./_}${test_cpu:+_amd64_${test_cpu}_index}"
-  test_tag="${test_minor}.99-java21-debian13${test_cpu:+-amd64-$test_cpu}-20261001T172459Z-g${test_commit}"
+  test_java_variant=
+  [[ "$test_java" == 21 ]] || test_java_variant="-java$test_java"
+  test_target="pyva_runtime_${test_minor//./_}${test_java_variant//-/_}${test_cpu:+_amd64_${test_cpu}_index}"
+  test_tag="${test_minor}.99-java${test_java}-debian13${test_cpu:+-amd64-$test_cpu}-20261001T172459Z-g${test_commit}"
   test_log="$test_root/operations"
   : > "$test_log"
   rm -f "$test_root/inspects" "$test_root/pulled"
@@ -134,8 +139,9 @@ with tarfile.open(fileobj=stream,mode='w') as archive:
     archive.addfile(member,io.BytesIO(b'ok'))
 layer=save(stream.getvalue())
 cpu=os.environ['test_cpu']
+java=os.environ['test_java']
 for arch in (('amd64',) if cpu else ('amd64','arm64')):
-    config={'os':'linux','architecture':arch,'config':{'Labels':{'org.opencontainers.image.version':minor+'.99-java21-debian13'}},'rootfs':{'diff_ids':[layer['digest']]}}
+    config={'os':'linux','architecture':arch,'config':{'Labels':{'org.opencontainers.image.version':minor+'.99-java'+java+'-debian13'}},'rootfs':{'diff_ids':[layer['digest']]}}
     if cpu: config['config']['Labels']['io.pyva.cpu.variant']='v1' if os.environ['test_failure']=='cpu-identity' else cpu
     cfg=save(config)
     (root/('loaded-'+arch+'.json')).write_text(json.dumps({'Os':'linux','Architecture':arch,'Config':config['config'],'RootFS':{'Layers':[layer['digest']]}}))
@@ -152,14 +158,14 @@ PY
 run_case() {
   prepare
   local status=0
-  output="$(command bash "$release_script" "${test_cpu_args[@]}" "$@" 2>&1)" || status=$?
+  output="$(command bash "$release_script" "${test_args[@]}" "$@" 2>&1)" || status=$?
   if [[ "$test_failure" == none ]]; then
     [[ "$status" == 0 && "$output" == *"Published $test_repository:$test_tag ($test_repository@$test_index)"* ]] || { echo "$output" >&2; return 1; }
     if [[ "$test_existing" == true ]]; then ! command grep -q '^bazel run' "$test_log"; else command grep -q '^bazel run' "$test_log"; fi
     local arches=(amd64 arm64)
     [[ -z "$test_cpu" ]] || arches=(amd64)
     for arch in "${arches[@]}"; do
-      command grep -q "bash smoke_test.sh $test_minor --arch $arch${test_cpu:+ --cpu $test_cpu} $test_repository@$test_index" "$test_log"
+      command grep -q "bash smoke_test.sh $test_minor --arch $arch --java $test_java${test_cpu:+ --cpu $test_cpu} $test_repository@$test_index" "$test_log"
     done
     if [[ "${1:-}" == --channel ]]; then command grep -q 'imagetools create' "$test_log"; else ! command grep -q 'imagetools create' "$test_log"; fi
   else
@@ -171,8 +177,8 @@ run_case() {
   fi
 }
 for test_cpu in '' v2 v3; do
-  test_cpu_args=()
-  [[ -z "$test_cpu" ]] || test_cpu_args=(--cpu "$test_cpu")
+  test_args=(--java 21)
+  [[ -z "$test_cpu" ]] || test_args+=(--cpu "$test_cpu")
 for test_minor in 3.13 3.14; do
   for test_existing in false true; do
     run_case "$test_minor" docker.io/example/pyva-runtime
@@ -202,7 +208,18 @@ for test_minor in 3.13 3.14; do
 done
 done
 test_cpu=
-test_cpu_args=()
+test_java=25
+test_args=(--java 25)
+for test_minor in 3.13 3.14; do
+  run_case --channel "$test_minor" docker.io/example/pyva-runtime
+  test_failure=base-arm64
+  run_case --channel "$test_minor" docker.io/example/pyva-runtime
+  test_failure=remote-arm64
+  run_case --channel "$test_minor" docker.io/example/pyva-runtime
+  test_failure=none
+done
+test_java=21
+test_args=(--java 21)
 
 reject() {
   : > "$test_log"
@@ -216,6 +233,8 @@ reject --channel 3.13
 reject --cpu v1 3.13 docker.io/example/runtime
 reject --cpu v4 3.13 docker.io/example/runtime
 reject --cpu
+reject --java 17 3.13 docker.io/example/runtime
+reject --java 25 --cpu v3 3.13 docker.io/example/runtime
 reject 3.12 index.docker.io/example/runtime
 reject 3.13 index.docker.io/example/runtime extra
 for destination in '' example/runtime ghcr.io/example/runtime docker.io.evil/example/runtime \

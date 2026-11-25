@@ -1,4 +1,4 @@
-"""Prepare a committed Python update; the workflow authenticates and pushes it."""
+"""Prepare a committed runtime update; the workflow authenticates and pushes it."""
 
 import ast
 import json
@@ -6,6 +6,7 @@ import re
 import subprocess
 
 import update_python_manifest as updater
+import update_java_manifest as java_updater
 
 
 def run(*args):
@@ -31,27 +32,29 @@ def main():
     candidate = updater.render(updater.manifest(tag, checksums))
     if any(version < previous[minor] for minor, version in versions(candidate).items()):
         raise ValueError("refusing a Python patch downgrade")
+    java_updater.refresh()
     updater.refresh(tag, checksums, updater.OUTPUT)
     run("bazel", "mod", "tidy")
     run("bazel", "mod", "deps")
     changed = set(run("git", "diff", "--name-only", "-z", "HEAD").split("\0")) - {""}
     untracked = run("git", "ls-files", "--others", "--exclude-standard", "-z")
-    allowed = {"python_runtimes.MODULE.bazel", "MODULE.bazel.lock"}
+    allowed = {"python_runtimes.MODULE.bazel", "java_runtime.json", "MODULE.bazel.lock"}
     if changed - allowed or untracked:
         raise ValueError("unexpected files changed during Python update")
     for command in (
         ("bash", "test_repository.sh"),
         ("python3", "test_python_manifest.py"),
         ("python3", "test_python_manifest.py", "--bazel"),
+        ("python3", "test_java_runtime.py"),
         ("python3", "test_image_manifest.py"),
         ("bash", "test_release.sh"),
     ):
         print(run(*command), end="")
     if changed:
-        run("git", "add", "--", "python_runtimes.MODULE.bazel", "MODULE.bazel.lock")
+        run("git", "add", "--", *sorted(changed))
         run("git", "-c", "user.name=github-actions[bot]", "-c",
             "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-            "commit", "-m", "chore: refresh pinned Python runtimes")
+            "commit", "-m", "chore: refresh pinned runtimes")
     if run("git", "status", "--porcelain", "--untracked-files=all"):
         raise ValueError("Python preparation left a dirty checkout")
     print("Prepared source:", run("git", "rev-parse", "HEAD").strip())
