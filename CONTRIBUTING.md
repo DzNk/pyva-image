@@ -3,7 +3,7 @@
 ## Inputs and refresh
 
 Bazel uses the version in `.bazelversion`. `MODULE.bazel` pins a Distroless Debian
-13 OCI index and the Debian snapshot `20250901T000000Z` for both amd64 and arm64.
+13 OCI index and the Debian snapshot `20261125T000000Z` for both amd64 and arm64.
 Build tools use the catalog Python 3.12 toolchain on the build host; image
 interpreters remain the explicitly pinned Linux Python 3.13/3.14 artifacts.
 The generated Python fragment pins one stable patch per minor, eight immutable
