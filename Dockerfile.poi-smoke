@@ -3,7 +3,11 @@ ARG RUNTIME_IMAGE=pyva-runtime:${PYTHON_VERSION}
 
 FROM maven:3.9-eclipse-temurin-21 AS poi
 COPY poi-smoke-pom.xml /pom.xml
-RUN mvn -q -f /pom.xml org.apache.maven.plugins:maven-dependency-plugin:3.9.0:copy-dependencies -DoutputDirectory=/poi
+COPY poi-smoke-maven-settings.xml /maven-settings.xml
+# Hosted runners can be rate-limited by Maven Central.
+RUN set -- --quiet --strict-checksums --file /pom.xml \
+      org.apache.maven.plugins:maven-dependency-plugin:3.9.0:copy-dependencies -DoutputDirectory=/poi; \
+    mvn --settings /maven-settings.xml "$@" || mvn "$@"
 
 FROM python:${PYTHON_VERSION}-slim AS python_deps
 RUN python -m pip install --no-cache-dir --only-binary=:all: --target /python jpype1==1.7.1

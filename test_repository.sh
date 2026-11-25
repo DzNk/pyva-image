@@ -17,7 +17,7 @@ done
 for path in .bazelversion .gitignore .dockerignore .env.example \
   BUILD.bazel MODULE.bazel MODULE.bazel.lock python_runtimes.MODULE.bazel \
   runtime_image.bzl update_python_manifest.py README.md \
-  Dockerfile.poi-smoke poi-smoke-pom.xml poi_smoke.py \
+  Dockerfile.poi-smoke poi-smoke-pom.xml poi-smoke-maven-settings.xml poi_smoke.py \
   release.sh smoke_test.sh test_python_manifest.py image_manifest.py test_image_manifest.py test_release.sh test_repository.sh \
   .github/workflows/ci.yml ci_update_python.py test_ci_workflow.py test_ci_update.py CONTRIBUTING.md \
   cpu_check.py test_cpu_check.py \

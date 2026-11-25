@@ -2,4 +2,5 @@
 **
 !Dockerfile.poi-smoke
 !poi-smoke-pom.xml
+!poi-smoke-maven-settings.xml
 !poi_smoke.py
