@@ -111,7 +111,6 @@ jobs:
           bash test_release.sh
           python3 test_ci_workflow.py
           python3 test_ci_update.py
-          python3 test_cpu_check.py
           bash -n release.sh smoke_test.sh test_release.sh
           test -z "$(git status --porcelain --untracked-files=all)"
 
@@ -124,14 +123,9 @@ jobs:
       fail-fast: false
       matrix:
         minor: ['3.13', '3.14']
-        cpu: [baseline, v2, v3]
-        java: ['21']
-        include:
-          - {minor: '3.13', cpu: baseline, java: '25'}
-          - {minor: '3.14', cpu: baseline, java: '25'}
+        java: ['21', '25']
     env:
       MINOR: ${{ matrix.minor }}
-      CPU: ${{ matrix.cpu }}
       JAVA_MAJOR: ${{ matrix.java }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -160,7 +154,6 @@ jobs:
           docker version
           docker buildx version
           docker buildx inspect --bootstrap
-          if [[ "$CPU" != baseline ]]; then python3 cpu_check.py "$CPU"; fi
       - name: Validate pull request images
         if: ${{ github.event_name == 'pull_request' }}
         run: |
@@ -170,24 +163,15 @@ jobs:
             target+="_java25"
             local_tag+="-java25"
           fi
-          arches=(amd64 arm64)
-          cpu_args=()
-          if [[ "$CPU" != baseline ]]; then
-            target+="_amd64_${CPU}_index"
-            arches=(amd64)
-            cpu_args=(--cpu "$CPU")
-          fi
           bazel build "//:$target"
-          python3 image_manifest.py local "bazel-bin/$target" "$MINOR" --java "$JAVA_MAJOR" "${cpu_args[@]}"
-          for arch in "${arches[@]}"; do
-            selection="$arch"
-            if [[ "$CPU" != baseline ]]; then selection+="-$CPU"; fi
-            bash smoke_test.sh "$MINOR" --java "$JAVA_MAJOR" --arch "$arch" "${cpu_args[@]}"
+          python3 image_manifest.py local "bazel-bin/$target" "$MINOR" --java "$JAVA_MAJOR"
+          for arch in amd64 arm64; do
+            bash smoke_test.sh "$MINOR" --java "$JAVA_MAJOR" --arch "$arch"
             docker build --platform "linux/$arch" --file Dockerfile.poi-smoke \
               --build-arg "PYTHON_VERSION=$MINOR" \
-              --build-arg "RUNTIME_IMAGE=pyva-runtime:$local_tag-$selection" \
-              --tag "pyva-poi-smoke:$local_tag-$selection" .
-            docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$local_tag-$selection"
+              --build-arg "RUNTIME_IMAGE=pyva-runtime:$local_tag-$arch" \
+              --tag "pyva-poi-smoke:$local_tag-$arch" .
+            docker run --rm --platform "linux/$arch" --network none "pyva-poi-smoke:$local_tag-$arch"
           done
           test -z "$(git status --porcelain --untracked-files=all)"
       - name: Check publication configuration
@@ -209,7 +193,5 @@ jobs:
         env:
           DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
         run: |
-          cpu_args=()
-          if [[ "$CPU" != baseline ]]; then cpu_args=(--cpu "$CPU"); fi
-          bash release.sh --channel --java "$JAVA_MAJOR" "${cpu_args[@]}" "$MINOR" "$DOCKERHUB_REPOSITORY" | tee "$RUNNER_TEMP/release.log"
+          bash release.sh --channel --java "$JAVA_MAJOR" "$MINOR" "$DOCKERHUB_REPOSITORY" | tee "$RUNNER_TEMP/release.log"
           grep '^Published ' "$RUNNER_TEMP/release.log" >> "$GITHUB_STEP_SUMMARY"

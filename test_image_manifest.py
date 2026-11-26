@@ -6,8 +6,13 @@ import json
 from pathlib import Path
 import tarfile
 import tempfile
+from unittest.mock import patch
 
-from image_manifest import check_layer, local, packaging_path
+from image_manifest import JAVA_MANIFEST, check_layer, local, packaging_path
+
+
+java_tags = {major: "_".join(entry["version"].split("+"))
+             for major, entry in json.loads(JAVA_MANIFEST.read_text()).items()}
 
 
 def tar(names):
@@ -29,7 +34,7 @@ def rejected(operation):
         raise AssertionError("invalid candidate accepted")
 
 
-def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None, java="21"):
+def layout(root, minor, layers, arches=("amd64", "arm64"), annotation=None, label=None, java="21"):
     blobs = root / "blobs/sha256"
     blobs.mkdir(exist_ok=True, parents=True)
 
@@ -40,16 +45,16 @@ def layout(root, minor, layers, cpu="", arches=None, annotation=None, label=None
         return {"digest": "sha256:" + sha, "size": len(raw)}
 
     children = []
-    for arch in (arches if arches is not None else (("amd64",) if cpu else ("amd64", "arm64"))):
+    for arch in arches:
         descriptors = [dict(save(data), mediaType="application/vnd.oci.image.layer.v1.tar" + ("+gzip" if data.startswith(b"\x1f\x8b") else "")) for data in layers]
         metadata = {"org.opencontainers.image.version": minor + f".99-java{java}-debian13"}
-        if cpu:
-            metadata["io.pyva.cpu.variant"] = cpu if label is None else label
+        if label is not None:
+            metadata["io.pyva.cpu.variant"] = label
         config = save({"os": "linux", "architecture": arch, "config": {
             "Labels": metadata},
             "rootfs": {"type": "layers", "diff_ids": ["sha256:" + hashlib.sha256(gzip.decompress(data) if data.startswith(b"\x1f\x8b") else data).hexdigest() for data in layers]}})
         config["mediaType"] = "application/vnd.oci.image.config.v1+json"
-        annotations = {"io.pyva.cpu.variant": cpu if annotation is None else annotation} if cpu else {}
+        annotations = {"io.pyva.cpu.variant": annotation} if annotation is not None else {}
         child = save({"schemaVersion": 2, "config": config, "layers": descriptors, "annotations": annotations})
         child["mediaType"] = "application/vnd.oci.image.manifest.v1+json"
         child["platform"] = {"os": "linux", "architecture": arch}
@@ -74,7 +79,7 @@ with tempfile.TemporaryDirectory() as directory:
         for data in (good, gzip.compress(good, mtime=0)):
             check_layer(data)
             layout(root, minor, [data])
-            assert local(root, minor)[0] == minor + ".99-java21-debian13"
+            assert local(root, minor)[0] == f"{minor}.99-java{java_tags['21']}-debian13"
         forbidden = ["usr/bin/pip", "usr/bin/pip3", "usr/bin/pip" + minor,
                      stdlib + "ensurepip/_bundled/pip-26.2.1-py3-none-any.whl"] + [
             stdlib + "site-packages/" + path for path in (
@@ -85,7 +90,7 @@ with tempfile.TemporaryDirectory() as directory:
                 "_distutils_hack/__init__.py", "distutils-precedence.pth",
             )]
         layout(root, minor, [good], java="25")
-        assert local(root, minor, java="25")[0] == minor + ".99-java25-debian13"
+        assert local(root, minor, java="25")[0] == f"{minor}.99-java{java_tags['25']}-debian13"
         rejected(lambda: local(root, minor))
         for name in forbidden:
             assert packaging_path("./" + name), name
@@ -102,19 +107,18 @@ with tempfile.TemporaryDirectory() as directory:
         layout(root, minor, [good])
         (root / "blobs/sha256" / hashlib.sha256(good).hexdigest()).write_bytes(b"corrupted")
         rejected(lambda: local(root, minor))
-        for cpu in ("v2", "v3"):
-            layout(root, minor, [good], cpu)
-            assert local(root, minor, cpu)[0] == minor + ".99-java21-debian13-amd64-" + cpu
+        for kwargs in ({"arches": ("amd64",)}, {"arches": ()}, {"arches": ("amd64", "amd64")},
+                       {"label": "v2"}, {"label": "v3"}, {"annotation": "v2"}, {"annotation": "v3"}):
+            layout(root, minor, [good], **kwargs)
             rejected(lambda: local(root, minor))
-            layout(root, minor, [good])
-            rejected(lambda: local(root, minor, cpu))
-            for kwargs in ({"arches": ("amd64", "arm64")}, {"arches": ()},
-                           {"label": "v1"}, {"annotation": "v1"}, {"label": "v3" if cpu == "v2" else "v2"}):
-                layout(root, minor, [good], cpu, **kwargs)
-                rejected(lambda: local(root, minor, cpu))
-            layout(root, minor, [tar([forbidden[0]]), good], cpu)
-            rejected(lambda: local(root, minor, cpu))
-            layout(root, minor, [good], cpu)
-            (root / "blobs/sha256" / hashlib.sha256(good).hexdigest()).write_bytes(b"corrupted")
-            rejected(lambda: local(root, minor, cpu))
+        layout(root, minor, [good], label="v1", annotation="v1")
+        assert local(root, minor)[0] == f"{minor}.99-java{java_tags['21']}-debian13"
+        layout(root, minor, [good], java="25")
+        pin = root / "java_runtime.json"
+        with patch("image_manifest.JAVA_MANIFEST", pin):
+            pin.write_text('{"25": {"version": "25.0.5.1+10"}}')
+            assert local(root, minor, java="25")[0] == f"{minor}.99-java25.0.5.1_10-debian13"
+            for invalid in ("21.0.13.1+2", "25.0.5.1-ea+10"):
+                pin.write_text(json.dumps({"25": {"version": invalid}}))
+                rejected(lambda: local(root, minor, java="25"))
 print("OCI policy passed: every layer, gzip, hidden installers, retained dependencies and integrity")

@@ -9,6 +9,11 @@ import re
 import sys
 import tarfile
 
+from update_java_manifest import MANIFEST as JAVA_MANIFEST, version_key
+
+
+ARCHES = ("amd64", "arm64")
+
 
 def packaging_path(name):
     path = PurePosixPath(name)
@@ -44,29 +49,25 @@ def digest(value):
     return value
 
 
-def cpu_identity(metadata, cpu):
-    actual = metadata.get("io.pyva.cpu.variant", "")
-    if (cpu and actual != cpu) or (not cpu and actual not in ("", "v1")):
-        raise ValueError("CPU identity differs from selected variant")
+def check_baseline(metadata):
+    if metadata.get("io.pyva.cpu.variant", "") not in ("", "v1"):
+        raise ValueError("optimized image cannot substitute baseline")
 
 
-def children(index, cpu=""):
-    if cpu not in ("", "v2", "v3"):
-        raise ValueError("CPU variant must be v2 or v3")
-    expected = {"amd64"} if cpu else {"amd64", "arm64"}
+def children(index):
     result = {}
     for child in index["manifests"]:
         platform = child["platform"]
         arch = platform["architecture"]
-        if platform["os"] != "linux" or arch not in expected or arch in result:
+        if platform["os"] != "linux" or arch not in ARCHES or arch in result:
             raise ValueError("index platform set differs from selected release")
         result[arch] = digest(child["digest"])
-    if set(result) != expected:
+    if set(result) != set(ARCHES):
         raise ValueError("incomplete platform index")
     return result
 
 
-def local(root, minor, cpu="", java="21"):
+def local(root, minor, java="21"):
     def blob(descriptor):
         expected = digest(descriptor["digest"])
         data = (root / "blobs/sha256" / expected.split(":")[1]).read_bytes()
@@ -76,55 +77,58 @@ def local(root, minor, cpu="", java="21"):
 
     descriptor, = json.loads((root / "index.json").read_text())["manifests"]
     index = json.loads(blob(descriptor))
-    child_digests = children(index, cpu)
+    child_digests = children(index)
     versions = set()
     configs = {}
     for child in index["manifests"]:
         arch = child["platform"]["architecture"]
         manifest = json.loads(blob(child))
         config = json.loads(blob(manifest["config"]))
-        cpu_identity(config["config"]["Labels"], cpu)
-        cpu_identity(manifest.get("annotations", {}), cpu)
+        labels = config["config"]["Labels"]
+        check_baseline(labels)
+        check_baseline(manifest.get("annotations", {}))
         if not manifest["layers"]:
             raise ValueError("candidate has no filesystem layers")
         for layer in manifest["layers"]:
             check_layer(blob(layer))
         if (config["os"], config["architecture"]) != ("linux", arch):
             raise ValueError("config platform differs from index")
-        version = config["config"]["Labels"]["org.opencontainers.image.version"]
-        if not re.fullmatch(re.escape(minor) + rf"\.[0-9]+-java{re.escape(java)}-debian13", version):
+        version = re.fullmatch(rf"({re.escape(minor)}\.[0-9]+)-java{re.escape(java)}-debian13",
+                               labels["org.opencontainers.image.version"])
+        if not version:
             raise ValueError("unexpected runtime identity")
-        versions.add(version)
+        versions.add(version[1])
         configs[arch] = digest(manifest["config"]["digest"])
     if len(versions) != 1:
         raise ValueError("platform Python identities differ")
-    arches = ("amd64",) if cpu else ("amd64", "arm64")
-    family = versions.pop() + ("-amd64-" + cpu if cpu else "")
-    return [family, digest(descriptor["digest"])] + [child_digests[a] for a in arches] + [configs[a] for a in arches]
+    java_version = json.loads(JAVA_MANIFEST.read_text())[java]["version"]
+    numbers, _ = version_key(java_version)
+    if numbers[0] != int(java):
+        raise ValueError("Temurin pin does not match the selected Java major")
+    family = f"{versions.pop()}-java{java_version.replace('+', '_')}-debian13"
+    return [family, digest(descriptor["digest"])] + [child_digests[a] for a in ARCHES] + [configs[a] for a in ARCHES]
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cpu", choices=("v2", "v3"), default="")
     parser.add_argument("--java", choices=("21", "25"), default="21")
     parser.add_argument("mode", choices=("local", "remote", "loaded"))
     parser.add_argument("args", nargs="+")
     params = parser.parse_intermixed_args()
     if params.mode == "local":
         root, minor = params.args
-        print(" ".join(local(Path(root), minor, params.cpu, params.java)))
+        print(" ".join(local(Path(root), minor, params.java)))
     elif params.mode == "remote":
         descriptor = json.load(sys.stdin)
         expected = [digest(d) for d in params.args]
-        actual = children(descriptor, params.cpu)
-        arches = ("amd64",) if params.cpu else ("amd64", "arm64")
-        if [digest(descriptor["digest"])] + [actual[a] for a in arches] != expected:
+        actual = children(descriptor)
+        if [digest(descriptor["digest"])] + [actual[a] for a in ARCHES] != expected:
             raise ValueError("remote index/child digests differ from validated candidate")
     elif params.mode == "loaded":
         # Containerd-backed Docker may report a converted manifest as .Id.
         root, config_digest = params.args
         config = json.loads((Path(root) / "blobs/sha256" / digest(config_digest).split(":")[1]).read_text())
-        cpu_identity(config["config"]["Labels"], params.cpu)
+        check_baseline(config["config"]["Labels"])
         loaded = json.load(sys.stdin)
         if (loaded["Os"], loaded["Architecture"], loaded["Config"], loaded["RootFS"]["Layers"]) != (
             config["os"], config["architecture"], config["config"], config["rootfs"]["diff_ids"]

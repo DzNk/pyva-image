@@ -84,12 +84,11 @@ def java_layer(arch, java):
         srcs = [":app_dir", ":certs_dir", ":java_" + suffix],
     )
 
-def python_layer(python_version, arch, cpu_variant = ""):
+def python_layer(python_version, arch):
     """Package CPython once for the platform, shared by both Java majors."""
     suffix = python_version.replace(".", "_")
-    selection = arch + ("_" + cpu_variant if cpu_variant else "")
-    name = "pyva_runtime_" + suffix + "_" + selection
-    repo = "@cpython_" + suffix + "_" + selection
+    name = "pyva_runtime_" + suffix + "_" + arch
+    repo = "@cpython_" + suffix + "_" + arch
     executables = [
         "idle" + python_version,
         "pydoc" + python_version,
@@ -136,15 +135,12 @@ def python_layer(python_version, arch, cpu_variant = ""):
         ],
     )
 
-def runtime_image(python_version, arch, cpu_variant = "", java = "21"):
+def runtime_image(python_version, arch, java = "21"):
     """Define a platform image and its separately tagged Docker loader."""
-    if cpu_variant and (cpu_variant not in ["v2", "v3"] or arch != "amd64" or java != "21"):
-        fail("CPU variants require amd64, Java 21, and v2 or v3")
-    selection = arch + ("_" + cpu_variant if cpu_variant else "")
     root = "pyva_runtime_" + python_version.replace(".", "_")
     java_suffix = "" if java == "21" else "_java" + java
     local_tag = python_version + java_suffix.replace("_", "-")
-    name = root + java_suffix + "_" + selection
+    name = root + java_suffix + "_" + arch
     java_home = "/usr/lib/jvm/java-{}-openjdk-{}".format(java, arch)
     version = MINOR_MAPPING[python_version]
     tag = version + "-java" + java + "-debian13"
@@ -154,8 +150,6 @@ def runtime_image(python_version, arch, cpu_variant = "", java = "21"):
         "org.opencontainers.image.version": tag,
         "org.opencontainers.image.base.name": "gcr.io/distroless/static-debian13",
     }
-    if cpu_variant:
-        metadata["io.pyva.cpu.variant"] = cpu_variant
     oci_image(
         name = name,
         base = "@distroless_static_debian13_linux_" + ("arm64_v8" if arch == "arm64" else arch),
@@ -172,7 +166,7 @@ def runtime_image(python_version, arch, cpu_variant = "", java = "21"):
         tars = [
             ":runtime_libraries_" + arch,
             ":java_layer_" + java + "_" + arch,
-            ":" + root + "_" + selection + "_python_layer",
+            ":" + root + "_" + arch + "_python_layer",
             ":metadata_layer_" + java + "_" + arch,
         ],
         user = "65532:65532",
@@ -181,29 +175,25 @@ def runtime_image(python_version, arch, cpu_variant = "", java = "21"):
     oci_load(
         name = name + "_load",
         image = ":" + name,
-        repo_tags = ["pyva-runtime:" + local_tag + "-" + selection.replace("_", "-")] + (
-            ["pyva-runtime:" + local_tag, "pyva-runtime:" + tag] if arch == "amd64" and not cpu_variant else []
+        repo_tags = ["pyva-runtime:" + local_tag + "-" + arch] + (
+            ["pyva-runtime:" + local_tag, "pyva-runtime:" + tag] if arch == "amd64" else []
         ),
     )
 
-def runtime_index(python_version, cpu_variant = "", java = "21"):
-    """Publish the default pair or one explicit CPU image; release.sh sets tags."""
-    if cpu_variant not in ["", "v2", "v3"]:
-        fail("CPU variant must be v2 or v3")
+def runtime_index(python_version, java = "21"):
+    """Define the two-platform index and its legacy amd64 loader."""
     java_variant = "" if java == "21" else "java" + java
     root = "pyva_runtime_" + python_version.replace(".", "_") + ("_" + java_variant if java_variant else "")
-    name = root + ("_amd64_" + cpu_variant + "_index" if cpu_variant else "")
     oci_image_index(
-        name = name,
-        images = [":" + root + "_amd64_" + cpu_variant] if cpu_variant else [":" + root + "_amd64", ":" + root + "_arm64"],
+        name = root,
+        images = [":" + root + "_amd64", ":" + root + "_arm64"],
     )
-    oci_push(name = name + "_push", image = ":" + name)
-    if not cpu_variant:
-        oci_load(
-            name = name + "_load",
-            image = ":" + name + "_amd64",
-            repo_tags = [
-                "pyva-runtime:" + python_version + ("-" + java_variant if java_variant else ""),
-                "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java" + java + "-debian13",
-            ],
-        )
+    oci_push(name = root + "_push", image = ":" + root)
+    oci_load(
+        name = root + "_load",
+        image = ":" + root + "_amd64",
+        repo_tags = [
+            "pyva-runtime:" + python_version + ("-" + java_variant if java_variant else ""),
+            "pyva-runtime:" + MINOR_MAPPING[python_version] + "-java" + java + "-debian13",
+        ],
+    )

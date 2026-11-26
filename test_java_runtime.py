@@ -36,15 +36,17 @@ with tempfile.TemporaryDirectory() as directory:
     original = MANIFEST.read_text()
     destination.write_text(original)
     assert refresh(destination, releases.__getitem__) == saved
-    changed = upstream("25", "25.0.5.1+10", dict.fromkeys(ARCHITECTURES, "a" * 64))
-    broken_digest = upstream("25", "25.0.5.1+10", dict.fromkeys(ARCHITECTURES, "bad"))
+    pinned = saved["25"]["version"]
+    version, build = pinned.split("+")
+    next_build = f"{version}+{int(build) + 1}"
+    changed = upstream("25", next_build, dict.fromkeys(ARCHITECTURES, "a" * 64))
+    broken_digest = upstream("25", next_build, dict.fromkeys(ARCHITECTURES, "bad"))
     for invalid in (
         {**changed, "assets": changed["assets"][:1]},
         {**changed, "prerelease": True},
         broken_digest,
         upstream("25", "25.0.5+99", dict.fromkeys(ARCHITECTURES, "a" * 64)),
-        upstream("25", "25.0.5.1+1", dict.fromkeys(ARCHITECTURES, "a" * 64)),
-        upstream("25", "25.0.5.1+2", dict.fromkeys(ARCHITECTURES, "a" * 64)),
+        upstream("25", pinned, dict.fromkeys(ARCHITECTURES, "a" * 64)),
     ):
         try:
             refresh(destination, {**releases, "25": invalid}.__getitem__)
@@ -52,7 +54,14 @@ with tempfile.TemporaryDirectory() as directory:
             assert destination.read_text() == original
         else:
             raise AssertionError(f"accepted invalid Temurin release: {invalid}")
-    assert refresh(destination, {**releases, "25": changed}.__getitem__)["25"]["version"] == "25.0.5.1+10"
+    assert refresh(destination, {**releases, "25": changed}.__getitem__)["25"]["version"] == next_build
+    updated = destination.read_text()
+    try:
+        refresh(destination, releases.__getitem__)
+    except ValueError:
+        assert destination.read_text() == updated
+    else:
+        raise AssertionError("accepted a previous Temurin build")
 
     archive = Path(directory) / "fixture.tar.gz"
     output = Path(directory) / "layer.tar.gz"
@@ -93,7 +102,7 @@ for major, entry in saved.items():
     for detected, detected_vendor in (
         (version.rsplit(".", 1)[0] + "+99", vendor),
         (version + "-ea+" + build, vendor),
-        (version + "+99", vendor),
+        (f"{version}+{int(build) + 1}", vendor),
         ("unparseable", vendor),
         (entry["version"], "Other vendor"),
     ):

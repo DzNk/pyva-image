@@ -25,11 +25,12 @@ checksums = "\n".join([
     record("3.14.10"), record("3.14.11rc1"),
     record("3.14.10", "aarch64-unknown-linux-gnu"),
     record("3.14.11", "x86_64-unknown-linux-musl"),
+    record("3.14.11", "x86_64_v2-unknown-linux-gnu"),
+    record("3.14.11", "x86_64_v3-unknown-linux-gnu"),
     record("3.14.11", "x86_64_v4-unknown-linux-gnu"),
     record("3.14.11", "x86_64-unknown-linux-gnu-freethreaded"),
     record("3.14.10", flavor="install_only", sha="b" * 64),
-] + [record(version, target) for version in ("3.13.15", "3.14.10")
-     for arch, target in PLATFORMS.items() if arch.startswith("amd64_v")])
+])
 selected = manifest(tag, checksums)
 assert [(v, arch) for v, arch, _, _ in selected] == [
     (v, arch) for v in ("3.13.15", "3.14.10") for arch in PLATFORMS
@@ -44,8 +45,8 @@ assert '\n\n# Build tools use a catalog runtime' in contents
 assert contents == render(manifest(tag, checksums))
 assert 'minor_mapping = {\n    "3.13": "3.13.15",\n    "3.14": "3.14.10",\n}' in contents
 assert "available_python_versions" not in contents
-assert contents.count("python.single_version_platform_override(") == 8
-assert contents.count('target_compatible_with = ["@platforms//:incompatible"]') == 4
+assert contents.count("python.single_version_platform_override(") == 4
+assert "x86_64_v" not in contents
 assert 'python.toolchain(python_version = "3.13")' in contents
 assert 'python.toolchain(python_version = "3.14")' in contents
 for version, arch, url, sha in selected:
@@ -124,7 +125,6 @@ if sys.argv[1:] == ["--bazel"]:
             "3.13": "3.13.12", "3.14": "3.14.3",
         }, mapping
         assert "3.11" in mapping, mapping
-        assert "@platforms//:incompatible" in result
         for version, arch, url, sha in saved:
             minor = version.rsplit(".", 1)[0].replace(".", "_")
             repo = result.split(f"## @cpython_{minor}_{arch}:")[1].split("\n## ")[0]

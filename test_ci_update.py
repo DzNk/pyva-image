@@ -17,6 +17,8 @@ from test_ci_workflow import WORKFLOW, shell
 push_script = shell(WORKFLOW.read_text(), "Save source before publishing")
 assert "--force" not in push_script and "git config" not in push_script
 real_run = ci.run
+real_refresh_java = ci.java_updater.refresh
+saved_java = json.loads(ci.java_updater.MANIFEST.read_text())
 
 
 def records(tag, patch_version):
@@ -24,6 +26,17 @@ def records(tag, patch_version):
         f"{'a' * 64}  cpython-{minor}.{patch_version}+{tag}-{platform}-install_only_stripped.tar.gz"
         for minor in updater.MINORS for platform in updater.PLATFORMS.values()
     )
+
+
+def temurin_release(major, version, checksums):
+    return {
+        "tag_name": f"jdk-{version}", "draft": False, "prerelease": False,
+        "assets": [
+            {"name": f"OpenJDK{major}U-jre_{cpu}_linux_hotspot_{version.replace('+', '_')}.tar.gz",
+             "state": "uploaded", "digest": f"sha256:{checksums[arch]}"}
+            for arch, cpu in ci.java_updater.ARCHITECTURES.items()
+        ],
+    }
 
 
 def scenario(case):
@@ -41,7 +54,8 @@ def scenario(case):
             fragment = repo / "python_runtimes.MODULE.bazel"
             fragment.write_text(updater.render(updater.manifest("20260929", records("20260929", 9))))
             java_manifest = repo / "java_runtime.json"
-            java_manifest.write_text("previous Java pins\n")
+            original_java = json.dumps(saved_java, indent=2) + "\n"
+            java_manifest.write_text(original_java)
             (repo / "MODULE.bazel.lock").write_text("old lock\n")
             real_run("git", "add", ".")
             real_run("git", "commit", "--quiet", "-m", "fixture")
@@ -58,6 +72,18 @@ def scenario(case):
                 data = "\n".join(line for line in data.splitlines() if f"-{target}-" not in line)
             if case == "bad-checksum":
                 data = data.replace("a" * 64, "bad")
+            releases = {
+                major: temurin_release(major, entry["version"],
+                                       {arch: value["sha256"] for arch, value in entry["archives"].items()})
+                for major, entry in saved_java.items()
+            }
+            java_changed = case in ("java-only", "python-and-java")
+            java_version, java_build = saved_java["25"]["version"].split("+")
+            new_java = f"{java_version}+{int(java_build) + 1}"
+            if java_changed or case == "missing-java":
+                releases["25"] = temurin_release("25", new_java, dict.fromkeys(ci.java_updater.ARCHITECTURES, "b" * 64))
+            if case == "missing-java":
+                releases["25"]["assets"].pop()
 
             def download(url):
                 if url == updater.LATEST:
@@ -79,10 +105,7 @@ def scenario(case):
                 return real_run(*args)
 
             def refresh_java():
-                if case == "java-only":
-                    java_manifest.write_text("updated Java pins\n")
-                if case == "missing-java":
-                    raise ValueError("incomplete Java release")
+                return real_refresh_java(java_manifest, releases.__getitem__)
 
             failed = False
             try:
@@ -95,11 +118,25 @@ def scenario(case):
             if invalid:
                 assert real_run("git", "rev-parse", "HEAD").strip() == before
                 assert real_run("git", "ls-remote", "origin", "refs/heads/main").split()[0] == before
+                if case.startswith("missing-"):
+                    assert java_manifest.read_text() == original_java
+                    assert not real_run("git", "status", "--porcelain", "--untracked-files=all")
                 return
             after = real_run("git", "rev-parse", "HEAD").strip()
             assert (after == before) == (case == "no-change")
+            assert int(real_run("git", "rev-list", "--count", f"{before}..{after}")) == int(after != before)
+            expected_files = set() if case == "no-change" else {"python_runtimes.MODULE.bazel", "MODULE.bazel.lock"}
             if case == "java-only":
-                assert real_run("git", "diff", "--name-only", before, after).strip() == "java_runtime.json"
+                expected_files.clear()
+            if java_changed:
+                expected_files.add("java_runtime.json")
+                pins = json.loads(real_run("git", "show", f"{after}:java_runtime.json"))
+                assert pins["21"] == saved_java["21"] and pins["25"]["version"] == new_java
+                assert set(pins["25"]["archives"]) == set(ci.java_updater.ARCHITECTURES)
+            assert set(real_run("git", "diff", "--name-only", before, after).splitlines()) == expected_files
+            assert ci.versions(real_run("git", "show", f"{after}:python_runtimes.MODULE.bazel")) == {
+                "3.13": (3, 13, candidate_patch), "3.14": (3, 14, candidate_patch),
+            }
             assert not real_run("git", "status", "--porcelain", "--untracked-files=all")
             assert "extraheader" not in (repo / ".git/config").read_text()
             if case == "rejected-push":
@@ -131,6 +168,8 @@ def scenario(case):
             os.chdir(original_cwd)
 
 
-for case in ("update", "java-only", "no-change", "astral-rebuild", "downgrade", "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main", "missing-java", *("missing-" + arch for arch in updater.PLATFORMS)):
+for case in ("update", "java-only", "python-and-java", "no-change", "astral-rebuild", "downgrade",
+             "bad-checksum", "bad-metadata", "unexpected-file", "failed-check", "rejected-push", "concurrent-main",
+             "missing-java", *("missing-" + arch for arch in updater.PLATFORMS)):
     scenario(case)
 print("CI update passed: numeric patches, atomic inputs, real Git push, no-change/retry and rejected/concurrent writes")
